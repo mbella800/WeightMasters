@@ -20,24 +20,44 @@ module.exports = async (req, res) => {
     const items = data.items || []
     const shippingMethod = data.shippingMethod || "postnl"
     const checkoutSlug = data.checkoutSlug
+    const couponId = data.couponId || null
 
     if (!checkoutSlug) throw new Error("checkoutSlug ontbreekt in request")
 
     let subtotal = 0
     const line_items = []
+    const itemDetails = []
 
     for (const item of items) {
       const quantity = item.quantity || 1
-      const unitAmount = Math.round(Number(item["Product Price"] || item.productPrice || 0) * 100)
-      if (isNaN(unitAmount)) throw new Error("unitAmount is geen geldig getal")
+      const original = parseFloat(item["Original Price"]) || 0
+      const sale = parseFloat(item["Sale Price Optioneel"]) || 0
+      const prijs = sale > 0 && sale < original ? sale : original
+      const unitAmount = Math.round(prijs * 100)
+
+      if (isNaN(unitAmount)) throw new Error("unitAmount is ongeldig")
+
       subtotal += unitAmount * quantity
+
+      // Voor visuele e-mail & logging
+      itemDetails.push({
+        name: item["Product Name"],
+        quantity,
+        image: item["Product Image"] || "",
+        price: prijs.toFixed(2),
+        originalPrice: original.toFixed(2),
+        discountPercentage:
+          sale > 0 && sale < original
+            ? `${Math.round(((original - sale) / original) * 100)}%`
+            : "0%",
+      })
 
       line_items.push({
         price_data: {
           currency: "eur",
           product_data: {
-            name: item["Product Name"] || item.title || "Product",
-            images: [item["Product Image"] || item["ProductImage"]].filter(Boolean),
+            name: item["Product Name"] || "Product",
+            images: [item["Product Image"]].filter(Boolean),
           },
           unit_amount: unitAmount,
         },
@@ -77,21 +97,22 @@ module.exports = async (req, res) => {
     }
 
     const orderId = generateOrderId()
+    const total = subtotal + tax + shippingFee
 
     const metadata = {
       orderId,
       checkoutSlug,
       shippingMethod,
-      subtotal: subtotal.toString(),
-      tax: tax.toString(),
-      shippingFee: shippingFee.toString(),
-      total: (subtotal + tax + shippingFee).toString(),
-      items: JSON.stringify(items),
+      subtotal: (subtotal / 100).toFixed(2),
+      tax: (tax / 100).toFixed(2),
+      shippingFee: (shippingFee / 100).toFixed(2),
+      total: (total / 100).toFixed(2),
+      items: JSON.stringify(itemDetails),
     }
 
     const origin = req.headers.origin || "https://example.com"
 
-    const session = await stripe.checkout.sessions.create({
+    const sessionPayload = {
       payment_method_types: ["card", "ideal"],
       mode: "payment",
       line_items,
@@ -105,7 +126,15 @@ module.exports = async (req, res) => {
         enabled: true,
       },
       customer_email: data.email || undefined,
-    })
+    }
+
+    // Voeg eventueel kortingscode toe
+    if (couponId) {
+      sessionPayload.discounts = [{ coupon: couponId }]
+      metadata.couponId = couponId
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionPayload)
 
     res.status(200).json({ id: session.id, url: session.url })
   } catch (err) {
