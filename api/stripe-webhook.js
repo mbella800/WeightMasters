@@ -39,25 +39,65 @@ export default async function handler(req, res) {
     const customer_name = session.customer_details?.name || ""
     const shipping = session.total_details?.amount_shipping || metadata.shippingFee || 0
 
+    // ✅ DISCOUNT INFORMATIE UIT METADATA
+    const totalOriginalValue = parseFloat(metadata.totalOriginalValue || 0) / 100
+    const totalSavedAmount = parseFloat(metadata.totalSavedAmount || 0) / 100
+    const totalDiscountPercentage = parseInt(metadata.totalDiscountPercentage || 0)
+    const hasAnyDiscount = metadata.hasAnyDiscount === "true"
+
     let items = []
+    let itemsWithDiscount = []
+
     try {
-      const parsed = JSON.parse(metadata.items)
-      if (Array.isArray(parsed)) {
-        items = parsed.map((item) => ({
-          productName: item.ProductName || item.title || "",
+      // ✅ PARSE ITEMS MET DISCOUNT INFO
+      const itemsWithDiscountInfo = JSON.parse(metadata.itemsWithDiscountInfo || "[]")
+      
+      if (Array.isArray(itemsWithDiscountInfo)) {
+        items = itemsWithDiscountInfo.map((item) => ({
+          productName: item["Product Name"] || item.title || "",
           productImage:
-            typeof item.productImage === "object" && item.productImage?.url
-              ? item.productImage.url
-              : item.productImage || "",
-          productPrice: parseFloat(item.productPrice).toFixed(2),
+            typeof item["Product Image"] === "object" && item["Product Image"]?.url
+              ? item["Product Image"].url
+              : item["Product Image"] || "",
+          productPrice: item.effectivePrice.toFixed(2), // ✅ Effectieve prijs (met korting)
+          originalPrice: item.originalPrice.toFixed(2), // ✅ Originele prijs
+          salePrice: item.hasDiscount ? item.salePrice.toFixed(2) : null, // ✅ Sale prijs
+          hasDiscount: item.hasDiscount, // ✅ Of er korting is
+          discountPercentage: item.discountPercentage, // ✅ Korting percentage
+          itemSavings: item.itemSavings.toFixed(2), // ✅ Besparing per item
           quantity: item.quantity || 1,
-          totalPrice: (parseFloat(item.productPrice || 0) * (item.quantity || 1)).toFixed(2),
+          totalPrice: (item.effectivePrice * (item.quantity || 1)).toFixed(2),
+          totalOriginalPrice: (item.originalPrice * (item.quantity || 1)).toFixed(2), // ✅ Totale originele prijs
         }))
+
+        // ✅ APART ARRAY VOOR ITEMS MET KORTING (voor template)
+        itemsWithDiscount = items.filter(item => item.hasDiscount)
       }
     } catch (err) {
       console.error("❌ Kon items niet parsen uit metadata:", err.message)
+      
+      // ✅ FALLBACK NAAR OUDE METHODE
+      try {
+        const parsed = JSON.parse(metadata.items)
+        if (Array.isArray(parsed)) {
+          items = parsed.map((item) => ({
+            productName: item.ProductName || item.title || "",
+            productImage:
+              typeof item.productImage === "object" && item.productImage?.url
+                ? item.productImage.url
+                : item.productImage || "",
+            productPrice: parseFloat(item.productPrice).toFixed(2),
+            quantity: item.quantity || 1,
+            totalPrice: (parseFloat(item.productPrice || 0) * (item.quantity || 1)).toFixed(2),
+            hasDiscount: false,
+          }))
+        }
+      } catch (fallbackErr) {
+        console.error("❌ Fallback parsing ook gefaald:", fallbackErr.message)
+      }
     }
 
+    // ✅ UITGEBREIDE DATA VOOR BREVO TEMPLATE
     const data = {
       name: customer_name,
       email: customer_email,
@@ -68,6 +108,19 @@ export default async function handler(req, res) {
       total: (parseFloat(metadata.total) / 100).toFixed(2),
       shopName: capitalizeWords((metadata.checkoutSlug || "Webshop").replace(/-/g, " ")),
       items,
+      
+      // ✅ NIEUWE DISCOUNT VARIABELEN VOOR BREVO TEMPLATE
+      hasAnyDiscount,
+      totalOriginalValue: totalOriginalValue.toFixed(2),
+      totalSavedAmount: totalSavedAmount.toFixed(2),
+      totalDiscountPercentage,
+      itemsWithDiscount,
+      
+      // ✅ EXTRA HANDIGE VARIABELEN
+      savingsText: hasAnyDiscount ? `Je totale besparing: €${totalSavedAmount.toFixed(2)}` : "",
+      discountSummary: hasAnyDiscount ? 
+        `${totalDiscountPercentage}% korting - €${totalSavedAmount.toFixed(2)} bespaard!` : 
+        "",
     }
 
     try {
@@ -93,6 +146,10 @@ export default async function handler(req, res) {
         console.error("❌ Brevo response fout:", response.status, errorText)
       } else {
         console.log("✅ Bevestigingsmail verzonden naar", data.email)
+        // ✅ DEBUG: Log discount info
+        if (hasAnyDiscount) {
+          console.log(`💰 Korting verwerkt: ${totalDiscountPercentage}% (€${totalSavedAmount.toFixed(2)} bespaard)`)
+        }
       }
     } catch (err) {
       console.error("❌ Fout bij verzenden mail via Brevo:", err.message)
