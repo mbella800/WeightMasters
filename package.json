@@ -1,0 +1,14 @@
+{
+  "name": "webshop-master-template",
+  "version": "1.0.0",
+  "license": "MIT",
+  "engines": {
+    "node": "18.x"
+  },
+  "dependencies": {
+    "stripe": "latest",
+    "googleapis": "latest",
+    "micro": "latest",
+    "sib-api-v3-sdk": "latest"
+  }
+}
