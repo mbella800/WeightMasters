@@ -25,8 +25,13 @@ module.exports = async (req, res) => {
     if (!checkoutSlug) throw new Error("checkoutSlug ontbreekt in request")
 
     let subtotal = 0
+    let totalOriginalValue = 0
+    let totalSavedAmount = 0
     const line_items = []
     const itemDetails = []
+
+    // ✅ DYNAMISCHE GRATIS VERZENDING DREMPEL UIT CMS
+    let freeShippingThreshold = 0 // Start met 0, wordt uit CMS gehaald
 
     for (const item of items) {
       const quantity = item.quantity || 1
@@ -38,6 +43,21 @@ module.exports = async (req, res) => {
       if (isNaN(unitAmount)) throw new Error("unitAmount is ongeldig")
 
       subtotal += unitAmount * quantity
+      totalOriginalValue += Math.round(original * 100) * quantity
+
+      // ✅ BESPARING PER ITEM
+      const itemSavings = (sale > 0 && sale < original) ? (original - sale) * quantity : 0
+      totalSavedAmount += Math.round(itemSavings * 100)
+
+      // ✅ GRATIS VERZENDING DREMPEL VOLLEDIG UIT CMS
+      const itemThreshold = parseFloat(item["Free Shipping Threshold"]) || 0
+      if (itemThreshold > 0) {
+        const thresholdInCents = itemThreshold * 100
+        // Gebruik de hoogste drempel van alle items
+        if (thresholdInCents > freeShippingThreshold) {
+          freeShippingThreshold = thresholdInCents
+        }
+      }
 
       // Voor visuele e-mail & logging
       itemDetails.push({
@@ -50,6 +70,7 @@ module.exports = async (req, res) => {
           sale > 0 && sale < original
             ? `${Math.round(((original - sale) / original) * 100)}%`
             : "0%",
+        savings: itemSavings > 0 ? `€${itemSavings.toFixed(2)}` : "€0,00",
       })
 
       line_items.push({
@@ -72,7 +93,17 @@ module.exports = async (req, res) => {
       dhl: 600,
       ophalen: 0,
     }
-    const shippingFee = shippingFees[shippingMethod] ?? 500
+    let shippingFee = shippingFees[shippingMethod] ?? 500
+
+    // ✅ GRATIS VERZENDING CHECK - ALLEEN ALS ER EEN DREMPEL IS INGESTELD
+    const qualifiesForFreeShipping = freeShippingThreshold > 0 && subtotal >= freeShippingThreshold
+    if (qualifiesForFreeShipping && shippingMethod !== "ophalen") {
+      shippingFee = 0
+    }
+
+    // ✅ TOTALE BESPARINGEN
+    const totalDiscountPercentage = totalOriginalValue > 0 ? 
+      Math.round((totalSavedAmount / totalOriginalValue) * 100) : 0
 
     if (tax > 0) {
       line_items.push({
@@ -85,6 +116,7 @@ module.exports = async (req, res) => {
       })
     }
 
+    // ✅ VERZENDKOSTEN MET GRATIS VERZENDING MELDING
     if (shippingFee > 0) {
       line_items.push({
         price_data: {
@@ -94,11 +126,21 @@ module.exports = async (req, res) => {
         },
         quantity: 1,
       })
+    } else if (qualifiesForFreeShipping) {
+      line_items.push({
+        price_data: {
+          currency: "eur",
+          product_data: { name: `Gratis verzending! 🎉 (vanaf €${(freeShippingThreshold / 100).toFixed(0)})` },
+          unit_amount: 0,
+        },
+        quantity: 1,
+      })
     }
 
     const orderId = generateOrderId()
     const total = subtotal + tax + shippingFee
 
+    // ✅ UITGEBREIDE METADATA MET BESPARINGEN
     const metadata = {
       orderId,
       checkoutSlug,
@@ -107,6 +149,20 @@ module.exports = async (req, res) => {
       tax: (tax / 100).toFixed(2),
       shippingFee: (shippingFee / 100).toFixed(2),
       total: (total / 100).toFixed(2),
+      
+      // ✅ BESPARING INFO
+      totalOriginalValue: (totalOriginalValue / 100).toFixed(2),
+      totalSavedAmount: (totalSavedAmount / 100).toFixed(2),
+      totalDiscountPercentage: totalDiscountPercentage.toString(),
+      hasDiscount: (totalSavedAmount > 0).toString(),
+      savingsMessage: totalSavedAmount > 0 ? 
+        `Je bespaart €${(totalSavedAmount / 100).toFixed(2)} (${totalDiscountPercentage}%)!` : "",
+      
+      // ✅ GRATIS VERZENDING INFO (DYNAMISCH)
+      freeShippingThreshold: freeShippingThreshold > 0 ? (freeShippingThreshold / 100).toFixed(2) : "0",
+      qualifiesForFreeShipping: qualifiesForFreeShipping.toString(),
+      freeShippingEnabled: (freeShippingThreshold > 0).toString(),
+      
       items: JSON.stringify(itemDetails),
     }
 
