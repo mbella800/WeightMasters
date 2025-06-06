@@ -8,9 +8,11 @@ function generateOrderId() {
 }
 
 module.exports = async (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*")
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS")
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type")
+  // ✅ EXPLICIETE CORS HEADERS
+  res.setHeader("Access-Control-Allow-Origin", "*")
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS, GET")
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept")
+  res.setHeader("Access-Control-Allow-Credentials", "false")
 
   if (req.method === "OPTIONS") return res.status(204).end()
   if (req.method !== "POST") return res.status(405).end("Method Not Allowed")
@@ -20,65 +22,89 @@ module.exports = async (req, res) => {
     const items = data.items || []
     const shippingMethod = data.shippingMethod || "postnl"
     const checkoutSlug = data.checkoutSlug
-    const couponId = data.couponId || null
 
     if (!checkoutSlug) throw new Error("checkoutSlug ontbreekt in request")
 
     let subtotal = 0
+    let totalWeight = 0
+    let freeShippingThreshold = 0
+    const line_items = []
+    let stripeCouponId = null
+
+    // ✅ NIEUWE DISCOUNT TRACKING VARIABELEN
     let totalOriginalValue = 0
     let totalSavedAmount = 0
-    const line_items = []
-    const itemDetails = []
+    const itemsWithDiscountInfo = []
 
-    // ✅ DYNAMISCHE GRATIS VERZENDING DREMPEL UIT CMS
-    let freeShippingThreshold = 0 // Start met 0, wordt uit CMS gehaald
-
+    // Process alle items
     for (const item of items) {
       const quantity = item.quantity || 1
-      const original = parseFloat(item["Original Price"]) || 0
-      const sale = parseFloat(item["Sale Price Optioneel"]) || 0
-      const prijs = sale > 0 && sale < original ? sale : original
-      const unitAmount = Math.round(prijs * 100)
-
-      if (isNaN(unitAmount)) throw new Error("unitAmount is ongeldig")
-
+      
+      // ✅ DISCOUNT BEREKENINGEN
+      const originalPrice = Number(item["Product Price"] || item.productPrice || 0)
+      const salePrice = Number(item["SalePriceOptioneel"] || item["Sale Price Optioneel"] || 0)
+      
+      // Effectieve prijs: sale price als beschikbaar, anders originele prijs
+      const effectivePrice = (salePrice > 0 && salePrice < originalPrice) ? salePrice : originalPrice
+      const hasDiscount = salePrice > 0 && salePrice < originalPrice
+      const itemSavings = hasDiscount ? (originalPrice - salePrice) * quantity : 0
+      const discountPercentage = hasDiscount ? Math.round(((originalPrice - salePrice) / originalPrice) * 100) : 0
+      
+      const unitAmount = Math.round(effectivePrice * 100)
+      if (isNaN(unitAmount)) throw new Error("unitAmount is geen geldig getal")
+      
       subtotal += unitAmount * quantity
-      totalOriginalValue += Math.round(original * 100) * quantity
-
-      // ✅ BESPARING PER ITEM
-      const itemSavings = (sale > 0 && sale < original) ? (original - sale) * quantity : 0
+      
+      // ✅ TOTAAL TRACKING
+      totalOriginalValue += Math.round(originalPrice * 100) * quantity
       totalSavedAmount += Math.round(itemSavings * 100)
-
-      // ✅ GRATIS VERZENDING DREMPEL VOLLEDIG UIT CMS
-      const itemThreshold = parseFloat(item["Free Shipping Threshold"]) || 0
-      if (itemThreshold > 0) {
-        const thresholdInCents = itemThreshold * 100
-        // Gebruik de hoogste drempel van alle items
-        if (thresholdInCents > freeShippingThreshold) {
-          freeShippingThreshold = thresholdInCents
-        }
+      
+      // Weight berekening voor gratis verzending
+      const itemWeight = Number(item["Weight"] || 0)
+      totalWeight += itemWeight * quantity
+      
+      // Hoogste free shipping threshold gebruiken
+      const threshold = Number(item["Free Shipping Threshold"] || 0)
+      if (threshold > freeShippingThreshold) {
+        freeShippingThreshold = threshold
       }
 
-      // Voor visuele e-mail & logging
-      itemDetails.push({
-        name: item["Product Name"],
-        quantity,
-        image: item["Product Image"] || "",
-        price: prijs.toFixed(2),
-        originalPrice: original.toFixed(2),
-        discountPercentage:
-          sale > 0 && sale < original
-            ? `${Math.round(((original - sale) / original) * 100)}%`
-            : "0%",
-        savings: itemSavings > 0 ? `€${itemSavings.toFixed(2)}` : "€0,00",
+      // Stripe Coupon ID opslaan (eerste item met coupon)
+      if (!stripeCouponId && item["Coupon ID"]) {
+        stripeCouponId = item["Coupon ID"]
+      }
+
+      // ✅ ITEM MET DISCOUNT INFO VOOR METADATA
+      itemsWithDiscountInfo.push({
+        ...item,
+        originalPrice: originalPrice,
+        effectivePrice: effectivePrice,
+        salePrice: hasDiscount ? salePrice : null,
+        hasDiscount: hasDiscount,
+        itemSavings: itemSavings,
+        discountPercentage: discountPercentage,
+        quantity: quantity
       })
 
+      // ✅ PRODUCT LINE ITEMS ZONDER BTW (BTW wordt apart toegevoegd)
       line_items.push({
         price_data: {
           currency: "eur",
           product_data: {
-            name: item["Product Name"] || "Product",
-            images: [item["Product Image"]].filter(Boolean),
+            name: item["Product Name"] || item.title || "Product",
+            images: [item["Product Image"] || item["ProductImage"]].filter(Boolean),
+            metadata: {
+              weight: itemWeight.toString(),
+              stripePriceId: item["Stripe Price ID"] || "",
+              stripeProductId: item["Stripe Product Id"] || "",
+              // ✅ DISCOUNT METADATA PER PRODUCT
+              originalPrice: originalPrice.toString(),
+              effectivePrice: effectivePrice.toString(),
+              salePrice: hasDiscount ? salePrice.toString() : "",
+              hasDiscount: hasDiscount.toString(),
+              discountPercentage: discountPercentage.toString(),
+              itemSavings: itemSavings.toString()
+            }
           },
           unit_amount: unitAmount,
         },
@@ -86,25 +112,65 @@ module.exports = async (req, res) => {
       })
     }
 
-    const tax = Math.round(subtotal * 0.21)
+    // ✅ TOTALE KORTING BEREKENINGEN
+    const totalDiscountPercentage = totalOriginalValue > 0 ? 
+      Math.round((totalSavedAmount / totalOriginalValue) * 100) : 0
 
+    // ✅ VOEG BESPARING TOE ALS APARTE REGEL (negatief bedrag)
+    if (totalSavedAmount > 0) {
+      line_items.push({
+        price_data: {
+          currency: "eur",
+          product_data: { 
+            name: `🎉 Je bespaart €${(totalSavedAmount / 100).toFixed(2)} (${totalDiscountPercentage}%)`,
+            description: "Sale korting op je producten"
+          },
+          unit_amount: -totalSavedAmount, // Negatief voor korting
+        },
+        quantity: 1,
+      })
+    }
+
+    // Verzendkosten logica (gratis verzending check)
     const shippingFees = {
       postnl: 500,
       dhl: 600,
       ophalen: 0,
     }
+    
     let shippingFee = shippingFees[shippingMethod] ?? 500
-
-    // ✅ GRATIS VERZENDING CHECK - ALLEEN ALS ER EEN DREMPEL IS INGESTELD
-    const qualifiesForFreeShipping = freeShippingThreshold > 0 && subtotal >= freeShippingThreshold
-    if (qualifiesForFreeShipping && shippingMethod !== "ophalen") {
+    
+    // Gratis verzending als drempel bereikt is (op subtotal, voor korting)
+    if (freeShippingThreshold > 0 && (subtotal / 100) >= freeShippingThreshold) {
       shippingFee = 0
     }
 
-    // ✅ TOTALE BESPARINGEN
-    const totalDiscountPercentage = totalOriginalValue > 0 ? 
-      Math.round((totalSavedAmount / totalOriginalValue) * 100) : 0
+    // Verzendkosten toevoegen
+    if (shippingFee > 0) {
+      line_items.push({
+        price_data: {
+          currency: "eur",
+          product_data: { name: `Verzendkosten - ${shippingMethod.toUpperCase()}` },
+          unit_amount: shippingFee,
+        },
+        quantity: 1,
+      })
+    } else if (freeShippingThreshold > 0 && shippingFee === 0) {
+      line_items.push({
+        price_data: {
+          currency: "eur",
+          product_data: { name: "Gratis verzending" },
+          unit_amount: 0,
+        },
+        quantity: 1,
+      })
+    }
 
+    // ✅ BTW BEREKENING OVER HELE CART (SUBTOTAL + VERZENDKOSTEN)
+    const taxableAmount = subtotal + shippingFee
+    const tax = Math.round(taxableAmount * 0.21)
+
+    // BTW toevoegen ALS APARTE REGEL
     if (tax > 0) {
       line_items.push({
         price_data: {
@@ -116,59 +182,35 @@ module.exports = async (req, res) => {
       })
     }
 
-    // ✅ VERZENDKOSTEN MET GRATIS VERZENDING MELDING
-    if (shippingFee > 0) {
-      line_items.push({
-        price_data: {
-          currency: "eur",
-          product_data: { name: `Verzendkosten - ${shippingMethod.toUpperCase()}` },
-          unit_amount: shippingFee,
-        },
-        quantity: 1,
-      })
-    } else if (qualifiesForFreeShipping) {
-      line_items.push({
-        price_data: {
-          currency: "eur",
-          product_data: { name: `Gratis verzending! 🎉 (vanaf €${(freeShippingThreshold / 100).toFixed(0)})` },
-          unit_amount: 0,
-        },
-        quantity: 1,
-      })
-    }
-
     const orderId = generateOrderId()
-    const total = subtotal + tax + shippingFee
 
-    // ✅ UITGEBREIDE METADATA MET BESPARINGEN
+    // ✅ UITGEBREIDE METADATA MET DISCOUNT INFO
     const metadata = {
       orderId,
       checkoutSlug,
       shippingMethod,
-      subtotal: (subtotal / 100).toFixed(2),
-      tax: (tax / 100).toFixed(2),
-      shippingFee: (shippingFee / 100).toFixed(2),
-      total: (total / 100).toFixed(2),
+      subtotal: subtotal.toString(),
+      tax: tax.toString(),
+      shippingFee: shippingFee.toString(),
+      totalWeight: totalWeight.toString(),
+      freeShippingThreshold: freeShippingThreshold.toString(),
+      stripeCouponId: stripeCouponId || "",
       
-      // ✅ BESPARING INFO
-      totalOriginalValue: (totalOriginalValue / 100).toFixed(2),
-      totalSavedAmount: (totalSavedAmount / 100).toFixed(2),
+      // ✅ NIEUWE DISCOUNT METADATA
+      totalOriginalValue: totalOriginalValue.toString(),
+      totalSavedAmount: totalSavedAmount.toString(),
       totalDiscountPercentage: totalDiscountPercentage.toString(),
-      hasDiscount: (totalSavedAmount > 0).toString(),
-      savingsMessage: totalSavedAmount > 0 ? 
-        `Je bespaart €${(totalSavedAmount / 100).toFixed(2)} (${totalDiscountPercentage}%)!` : "",
+      hasAnyDiscount: (totalSavedAmount > 0).toString(),
       
-      // ✅ GRATIS VERZENDING INFO (DYNAMISCH)
-      freeShippingThreshold: freeShippingThreshold > 0 ? (freeShippingThreshold / 100).toFixed(2) : "0",
-      qualifiesForFreeShipping: qualifiesForFreeShipping.toString(),
-      freeShippingEnabled: (freeShippingThreshold > 0).toString(),
-      
-      items: JSON.stringify(itemDetails),
+      // Items data
+      items: JSON.stringify(items),
+      itemsWithDiscountInfo: JSON.stringify(itemsWithDiscountInfo),
     }
 
     const origin = req.headers.origin || "https://example.com"
 
-    const sessionPayload = {
+    // ✅ Stripe Session configuratie met coupon support
+    const sessionConfig = {
       payment_method_types: ["card", "ideal"],
       mode: "payment",
       line_items,
@@ -182,15 +224,24 @@ module.exports = async (req, res) => {
         enabled: true,
       },
       customer_email: data.email || undefined,
+      // ✅ KORTINGSCODES EXPLICIET INSCHAKELEN
+      allow_promotion_codes: true,
+      // ✅ AUTOMATISCHE BTW BEREKENING UITSCHAKELEN (we doen het handmatig)
+      automatic_tax: {
+        enabled: false,
+      },
+      // ✅ BILLING ADDRESS VOOR BTW
+      billing_address_collection: "auto",
     }
 
-    // Voeg eventueel kortingscode toe
-    if (couponId) {
-      sessionPayload.discounts = [{ coupon: couponId }]
-      metadata.couponId = couponId
+    // ✅ Voeg automatische coupon toe als aanwezig
+    if (stripeCouponId) {
+      sessionConfig.discounts = [{
+        coupon: stripeCouponId
+      }]
     }
 
-    const session = await stripe.checkout.sessions.create(sessionPayload)
+    const session = await stripe.checkout.sessions.create(sessionConfig)
 
     res.status(200).json({ id: session.id, url: session.url })
   } catch (err) {
