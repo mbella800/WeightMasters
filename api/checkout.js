@@ -91,7 +91,9 @@ module.exports = async (req, res) => {
         price_data: {
           currency: "eur",
           product_data: {
-            name: item["Product Name"] || item.title || "Product",
+            name: hasDiscount 
+              ? `${item["Product Name"] || item.title || "Product"} 🎉 -${discountPercentage}% (was €${originalPrice.toFixed(2)})`
+              : item["Product Name"] || item.title || "Product",
             images: [item["Product Image"] || item["ProductImage"]].filter(Boolean),
             metadata: {
               weight: itemWeight.toString(),
@@ -116,16 +118,16 @@ module.exports = async (req, res) => {
     const totalDiscountPercentage = totalOriginalValue > 0 ? 
       Math.round((totalSavedAmount / totalOriginalValue) * 100) : 0
 
-    // ✅ VOEG BESPARING TOE ALS APARTE REGEL (negatief bedrag)
+    // ✅ VOEG BESPARING SAMENVATTING TOE (€0 informatieve regel)
     if (totalSavedAmount > 0) {
       line_items.push({
         price_data: {
           currency: "eur",
           product_data: { 
-            name: `🎉 Je bespaart €${(totalSavedAmount / 100).toFixed(2)} (${totalDiscountPercentage}%)`,
-            description: "Sale korting op je producten"
+            name: `💰 Totaal bespaard: €${(totalSavedAmount / 100).toFixed(2)} (${totalDiscountPercentage}%)`,
+            description: "Je bespaart met onze sale prijzen!"
           },
-          unit_amount: -totalSavedAmount, // Negatief voor korting
+          unit_amount: 0, // €0 - alleen informatief
         },
         quantity: 1,
       })
