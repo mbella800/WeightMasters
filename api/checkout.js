@@ -204,9 +204,9 @@ module.exports = async (req, res) => {
       totalDiscountPercentage: totalDiscountPercentage.toString(),
       hasAnyDiscount: (totalSavedAmount > 0).toString(),
       
-      // Items data
-      items: JSON.stringify(items),
-      itemsWithDiscountInfo: JSON.stringify(itemsWithDiscountInfo),
+      // ✅ COMPACTE ITEMS DATA (alleen essentiële info)
+      itemCount: items.length.toString(),
+      productNames: items.map(item => item["Product Name"] || "Product").join(", ").substring(0, 400),
     }
 
     const origin = req.headers.origin || "https://example.com"
