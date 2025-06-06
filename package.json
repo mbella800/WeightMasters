@@ -10,10 +10,5 @@
     "micro": "latest",
     "sib-api-v3-sdk": "latest",
     "stripe": "latest"
-  },
-  "scripts": {
-    "dev": "vercel dev",
-    "build": "vercel build",
-    "deploy": "vercel --prod"
   }
 }
