@@ -20,7 +20,6 @@ module.exports = async (req, res) => {
   try {
     const data = await json(req)
     const items = data.items || []
-    const shippingMethod = data.shippingMethod || "postnl"
     const checkoutSlug = data.checkoutSlug
 
     if (!checkoutSlug) throw new Error("checkoutSlug ontbreekt in request")
@@ -41,7 +40,7 @@ module.exports = async (req, res) => {
       const quantity = item.quantity || 1
       
       // ✅ DISCOUNT BEREKENINGEN
-      const originalPrice = Number(item["Product Price"] || item.productPrice || 0)
+      const originalPrice = Number(item["Original Price"] || item["Product Price"] || item.productPrice || 0)
       const salePrice = Number(item["SalePriceOptioneel"] || item["Sale Price Optioneel"] || 0)
       
       // Effectieve prijs: sale price als beschikbaar, anders originele prijs
@@ -50,21 +49,23 @@ module.exports = async (req, res) => {
       const itemSavings = hasDiscount ? (originalPrice - salePrice) * quantity : 0
       const discountPercentage = hasDiscount ? Math.round(((originalPrice - salePrice) / originalPrice) * 100) : 0
       
-      const unitAmount = Math.round(effectivePrice * 100)
+      // Calculate unit amount including BTW
+      const unitAmountExBtw = Math.round(effectivePrice * 100)
+      const unitAmount = Math.round(unitAmountExBtw * 1.21) // Include BTW in price
       if (isNaN(unitAmount)) throw new Error("unitAmount is geen geldig getal")
       
       subtotal += unitAmount * quantity
       
       // ✅ TOTAAL TRACKING
-      totalOriginalValue += Math.round(originalPrice * 100) * quantity
-      totalSavedAmount += Math.round(itemSavings * 100)
+      totalOriginalValue += Math.round(originalPrice * 100 * 1.21) * quantity // Include BTW in original value
+      totalSavedAmount += Math.round(itemSavings * 100 * 1.21) // Include BTW in savings
       
       // Weight berekening voor gratis verzending
       const itemWeight = Number(item["Weight"] || 0)
       totalWeight += itemWeight * quantity
       
       // Hoogste free shipping threshold gebruiken
-      const threshold = Number(item["Free Shipping Threshold"] || 0)
+      const threshold = Number(item["Free Shipping Threshold"] || 50)
       if (threshold > freeShippingThreshold) {
         freeShippingThreshold = threshold
       }
@@ -77,11 +78,11 @@ module.exports = async (req, res) => {
       // ✅ ITEM MET DISCOUNT INFO VOOR METADATA
       itemsWithDiscountInfo.push({
         ...item,
-        originalPrice: originalPrice,
-        effectivePrice: effectivePrice,
-        salePrice: hasDiscount ? salePrice : null,
+        originalPrice: (originalPrice * 1.21).toFixed(2), // Include BTW
+        effectivePrice: (effectivePrice * 1.21).toFixed(2), // Include BTW
+        salePrice: hasDiscount ? (salePrice * 1.21).toFixed(2) : null, // Include BTW
         hasDiscount: hasDiscount,
-        itemSavings: itemSavings,
+        itemSavings: (itemSavings * 1.21).toFixed(2), // Include BTW
         discountPercentage: discountPercentage,
         quantity: quantity
       })
@@ -92,7 +93,7 @@ module.exports = async (req, res) => {
           currency: "eur",
           product_data: {
             name: hasDiscount 
-              ? `${item["Product Name"] || item.title || "Product"} 🎉 -${discountPercentage}% (was €${originalPrice.toFixed(2)})`
+              ? `${item["Product Name"] || item.title || "Product"} 🎉 -${discountPercentage}% (was €${(originalPrice * 1.21).toFixed(2)})`
               : item["Product Name"] || item.title || "Product",
             images: [item["Product Image"] || item["ProductImage"]].filter(Boolean),
             metadata: {
@@ -100,15 +101,15 @@ module.exports = async (req, res) => {
               stripePriceId: item["Stripe Price ID"] || "",
               stripeProductId: item["Stripe Product Id"] || "",
               // ✅ DISCOUNT METADATA PER PRODUCT
-              originalPrice: originalPrice.toString(),
-              effectivePrice: effectivePrice.toString(),
-              salePrice: hasDiscount ? salePrice.toString() : "",
+              originalPrice: (originalPrice * 1.21).toString(), // Include BTW
+              effectivePrice: (effectivePrice * 1.21).toString(), // Include BTW
+              salePrice: hasDiscount ? (salePrice * 1.21).toString() : "", // Include BTW
               hasDiscount: hasDiscount.toString(),
               discountPercentage: discountPercentage.toString(),
-              itemSavings: itemSavings.toString()
+              itemSavings: (itemSavings * 1.21).toString() // Include BTW
             }
           },
-          unit_amount: unitAmount,
+          unit_amount: unitAmount, // Price already includes BTW
         },
         quantity,
       })
@@ -133,18 +134,16 @@ module.exports = async (req, res) => {
       })
     }
 
-    // Verzendkosten logica (gratis verzending check)
-    const shippingFees = {
-      postnl: 500,
-      dhl: 600,
-      ophalen: 0,
-    }
-    
-    let shippingFee = shippingFees[shippingMethod] ?? 500
-    
-    // Gratis verzending als drempel bereikt is (op subtotal, voor korting)
-    if (freeShippingThreshold > 0 && (subtotal / 100) >= freeShippingThreshold) {
-      shippingFee = 0
+    // Calculate shipping costs exactly like in CartShippingEstimate
+    let shippingFee = 0
+    const subtotalBeforeTax = subtotal / 1.21 / 100 // Convert back to pre-tax amount for threshold check
+
+    if (subtotalBeforeTax < freeShippingThreshold) {
+      if (totalWeight <= 20) shippingFee = 100 // €1,00
+      else if (totalWeight <= 50) shippingFee = 200 // €2,00
+      else if (totalWeight <= 500) shippingFee = 410 // €4,10
+      else if (totalWeight <= 2000) shippingFee = 695 // €6,95
+      else shippingFee = 995 // €9,95
     }
 
     // Verzendkosten toevoegen
@@ -152,33 +151,17 @@ module.exports = async (req, res) => {
       line_items.push({
         price_data: {
           currency: "eur",
-          product_data: { name: `Verzendkosten - ${shippingMethod.toUpperCase()}` },
+          product_data: { name: "Verzendkosten" },
           unit_amount: shippingFee,
         },
         quantity: 1,
       })
-    } else if (freeShippingThreshold > 0 && shippingFee === 0) {
+    } else {
       line_items.push({
         price_data: {
           currency: "eur",
           product_data: { name: "Gratis verzending" },
           unit_amount: 0,
-        },
-        quantity: 1,
-      })
-    }
-
-    // ✅ BTW BEREKENING OVER HELE CART (SUBTOTAL + VERZENDKOSTEN)
-    const taxableAmount = subtotal + shippingFee
-    const tax = Math.round(taxableAmount * 0.21)
-
-    // BTW toevoegen ALS APARTE REGEL
-    if (tax > 0) {
-      line_items.push({
-        price_data: {
-          currency: "eur",
-          product_data: { name: "BTW (21%)" },
-          unit_amount: tax,
         },
         quantity: 1,
       })
@@ -190,17 +173,15 @@ module.exports = async (req, res) => {
     const metadata = {
       orderId,
       checkoutSlug,
-      shippingMethod,
-      subtotal: subtotal.toString(),
-      tax: tax.toString(),
+      subtotal: subtotal.toString(), // Already includes BTW
       shippingFee: shippingFee.toString(),
       totalWeight: totalWeight.toString(),
       freeShippingThreshold: freeShippingThreshold.toString(),
       stripeCouponId: stripeCouponId || "",
       
       // ✅ NIEUWE DISCOUNT METADATA
-      totalOriginalValue: totalOriginalValue.toString(),
-      totalSavedAmount: totalSavedAmount.toString(),
+      totalOriginalValue: totalOriginalValue.toString(), // Already includes BTW
+      totalSavedAmount: totalSavedAmount.toString(), // Already includes BTW
       totalDiscountPercentage: totalDiscountPercentage.toString(),
       hasAnyDiscount: (totalSavedAmount > 0).toString(),
       
