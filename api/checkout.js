@@ -125,10 +125,10 @@ module.exports = async (req, res) => {
         price_data: {
           currency: "eur",
           product_data: { 
-            name: `💰 ${totalDiscountPercentage}% korting - €${(totalSavedAmount / 100).toFixed(2)}`,
-            description: "Je bespaart met onze sale prijzen!"
+            name: `💰 Je bespaart €${(totalSavedAmount / 100).toFixed(2)} (${totalDiscountPercentage}% korting)`,
+            description: "Korting is al verwerkt in de productprijs"
           },
-          unit_amount: -totalSavedAmount, // Show actual discount amount as negative
+          unit_amount: 0, // Must be 0 or positive for Stripe
         },
         quantity: 1,
       })
