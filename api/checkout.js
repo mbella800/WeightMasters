@@ -50,15 +50,15 @@ module.exports = async (req, res) => {
       const discountPercentage = hasDiscount ? Math.round(((originalPrice - salePrice) / originalPrice) * 100) : 0
       
       // Calculate unit amount including BTW
-      const unitAmountExBtw = Math.round(effectivePrice * 100)
-      const unitAmount = Math.round(unitAmountExBtw * 1.21) // Include BTW in price
+      const unitAmountExBtw = Math.round(effectivePrice * 100) // Price without BTW
+      const unitAmount = unitAmountExBtw // Don't add BTW again, it's already included
       if (isNaN(unitAmount)) throw new Error("unitAmount is geen geldig getal")
       
       subtotal += unitAmount * quantity
       
       // ✅ TOTAAL TRACKING
-      totalOriginalValue += Math.round(originalPrice * 100 * 1.21) * quantity // Include BTW in original value
-      totalSavedAmount += Math.round(itemSavings * 100 * 1.21) // Include BTW in savings
+      totalOriginalValue += Math.round(originalPrice * 100) * quantity // Original price already includes BTW
+      totalSavedAmount += Math.round(itemSavings * 100) // Savings already include BTW
       
       // Weight berekening voor gratis verzending
       const itemWeight = Number(item["Weight"] || 0)

@@ -1,9 +1,9 @@
-import Stripe from "stripe"
+const Stripe = require("stripe")
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
 // ✅ VERCEL-SPECIFIEKE CONFIG
-export const config = {
+exports.config = {
   api: {
     bodyParser: false,
   },
@@ -28,7 +28,7 @@ function getRawBody(req) {
   })
 }
 
-export default async function handler(req, res) {
+exports.handler = async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).send("Method Not Allowed")
   }
