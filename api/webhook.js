@@ -38,12 +38,12 @@ export default async function handler(req, res) {
     const metadata = session.metadata || {}
     const checkoutSlug = metadata.checkoutSlug || "default"
 
-    const sheetId = sheetConfig.find(
-      (entry) => entry.checkoutSlug === checkoutSlug
-    )?.sheetId
+    const sheetEntry = sheetConfig.find((entry) => entry.checkoutSlug === checkoutSlug)
+    const sheetId = sheetEntry?.sheetId || process.env.DEFAULT_SHEET_ID
+
     if (!sheetId) {
       console.error("❌ Geen sheetId gevonden voor:", checkoutSlug)
-      return res.status(400).send("Geen sheetId gevonden")
+      return res.status(400).send("Geen sheetId gevonden en DEFAULT_SHEET_ID niet ingesteld")
     }
 
     try {
