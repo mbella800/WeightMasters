@@ -125,6 +125,7 @@ async function sheetWebhook(event) {
       },
     })
 
+    console.log("✅ Order succesvol gelogd in Google Sheet")
     return { success: true, message: "Order logged to sheet" }
 
   } catch (error) {
@@ -143,11 +144,13 @@ module.exports = async function handler(req, res) {
     const rawBody = await getRawBody(req)
     const sig = req.headers['stripe-signature']
 
+    console.log("🔍 Verifying sheet webhook signature...")
     event = stripe.webhooks.constructEvent(
       rawBody,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET_SHEET
     )
+    console.log("✅ Sheet webhook signature verified")
 
     const result = await sheetWebhook(event)
     return res.json(result)

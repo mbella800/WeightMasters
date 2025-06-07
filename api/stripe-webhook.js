@@ -39,14 +39,12 @@ module.exports = async function handler(req, res) {
     const rawBody = await getRawBody(req)
     const sig = req.headers['stripe-signature']
 
-    console.log("🔑 Using webhook secret:", WEBHOOK_SECRET ? "Found" : "Missing")
-    
+    console.log("🔍 Verifying email webhook signature...")
     event = stripe.webhooks.constructEvent(
       rawBody,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     )
-
     console.log("✅ Email webhook signature verified")
 
     if (event.type === "checkout.session.completed") {
@@ -142,6 +140,7 @@ module.exports = async function handler(req, res) {
           }
         }
 
+        console.log("📧 Sending order confirmation email...")
         const response = await fetch("https://api.brevo.com/v3/smtp/email", {
           method: "POST",
           headers: {
@@ -156,6 +155,7 @@ module.exports = async function handler(req, res) {
           throw new Error(`Failed to send email: ${await response.text()}`)
         }
 
+        console.log("✅ Order confirmation email sent successfully")
         return res.status(200).json({ received: true })
 
       } catch (error) {
