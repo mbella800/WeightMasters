@@ -59,7 +59,7 @@ export default async function handler(req, res) {
     event = stripe.webhooks.constructEvent(
       body,
       sig,
-      process.env.STRIPE_WEBHOOK_SECRET_SHEET // Deze secret is voor de email webhook
+      process.env.STRIPE_WEBHOOK_SECRET // Changed to correct secret for email webhook
     )
     console.log("✅ Email webhook signature verified successfully")
     
