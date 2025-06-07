@@ -1,48 +1,54 @@
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" })
+// Simple test script for Brevo emails
+const handler = async (req, res) => {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' })
+  }
+
+  const testEmailPayload = {
+    sender: {
+      name: "Weightmasters Test",
+      email: "mailweightmasters@gmail.com"
+    },
+    to: [{
+      email: req.body.email || "vsnryweb@gmail.com", // Default test email
+      name: "Test User"
+    }],
+    subject: "Test Email van Weightmasters",
+    htmlContent: "<p>Dit is een test email om te controleren of Brevo correct werkt.</p>"
   }
 
   try {
-    console.log("📧 Testing Brevo email without template...")
-
+    console.log("📧 Sending test email...")
     const response = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
         "api-key": process.env.BREVO_API_KEY,
         "Content-Type": "application/json",
+        "Accept": "application/json"
       },
-      body: JSON.stringify({
-        sender: {
-          name: "WeightMasters Test",
-          email: "vsnryweb@gmail.com",
-        },
-        to: [{ 
-          email: "vsnryweb@gmail.com", 
-          name: "Test User" 
-        }],
-        subject: "Test Email - WeightMasters",
-        htmlContent: `
-          <h1>Test Email</h1>
-          <p>Als je deze email ontvangt, werkt Brevo correct!</p>
-          <p>Tijd: ${new Date().toISOString()}</p>
-        `,
-      }),
+      body: JSON.stringify(testEmailPayload)
     })
 
-    console.log("📬 Test email response status:", response.status)
-    
+    console.log("📬 Brevo response status:", response.status)
+    const responseText = await response.text()
+    console.log("📬 Brevo response:", responseText)
+
     if (!response.ok) {
-      const errorText = await response.text()
-      console.error("❌ Test email error:", errorText)
-      return res.status(400).json({ error: errorText })
-    } else {
-      const responseData = await response.text()
-      console.log("✅ Test email success:", responseData)
-      return res.status(200).json({ success: true, response: responseData })
+      throw new Error(`Failed to send email: ${responseText}`)
     }
-  } catch (err) {
-    console.error("❌ Test email exception:", err)
-    return res.status(500).json({ error: err.message })
+
+    return res.status(200).json({ 
+      success: true, 
+      message: "Test email sent successfully" 
+    })
+
+  } catch (error) {
+    console.error("❌ Error sending test email:", error)
+    return res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    })
   }
-} 
+}
+
+module.exports = handler 

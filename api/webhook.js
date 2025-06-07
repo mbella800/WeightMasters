@@ -1,4 +1,5 @@
 const { google } = require('googleapis')
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 
 async function getGoogleSheetClient() {
   const auth = new google.auth.GoogleAuth({
@@ -19,7 +20,6 @@ module.exports = async function sheetWebhook(session, customerName, customerEmai
     const subtotal = session.amount_subtotal / 100
     const shipping = session.total_details?.amount_shipping / 100 || 0
     const total = session.amount_total / 100
-    const btw = (total - shipping) * 0.21 // BTW is 21% over subtotaal
 
     const formatDate = (date) => {
       return new Intl.DateTimeFormat('nl-NL', {
@@ -41,7 +41,7 @@ module.exports = async function sheetWebhook(session, customerName, customerEmai
 
     // Get line items for product details
     const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { expand: ['data.price.product'] })
-    const items = lineItems.data.filter(item => !item.description.includes("Verzendkosten"))
+    const items = lineItems.data.filter(item => !item.description?.includes("Verzendkosten"))
     
     // Process all items and create rows for each
     const rows = items.map(item => {
@@ -67,13 +67,13 @@ module.exports = async function sheetWebhook(session, customerName, customerEmai
         address,                                   // Adres
         productName,                               // Product
         quantity,                                  // Aantal
-        formatPrice(originalPrice),                // Originele prijs
-        hasDiscount ? formatPrice(currentPrice) : "",  // Prijs na korting
+        formatPrice(originalPrice),                // Originele prijs (incl. BTW)
+        hasDiscount ? formatPrice(currentPrice) : "",  // Prijs na korting (incl. BTW)
         hasDiscount ? `${discountPercentage}%` : "",  // Korting %
-        hasDiscount ? formatPrice(savings) : "",   // Besparing per item
+        hasDiscount ? formatPrice(savings) : "",   // Besparing per item (incl. BTW)
         formatPrice(shipping),                     // Verzendkosten
-        "incl. 21% BTW",                          // BTW info
-        formatPrice(total),                        // Totaal
+        "incl. BTW",                              // BTW info
+        formatPrice(total),                        // Totaal (incl. BTW)
         session.payment_status === 'paid' ? "✅" : "",  // Betaalstatus
         emailSent ? "✅" : "❌"                    // Email status
       ]

@@ -93,23 +93,22 @@ module.exports = async (req, res) => {
           currency: "eur",
           product_data: {
             name: hasDiscount 
-              ? `${item["Product Name"] || item.title || "Product"} 🎉 -${discountPercentage}% (was €${(originalPrice * 1.21).toFixed(2)})`
+              ? `${item["Product Name"] || item.title || "Product"} 🎉 -${discountPercentage}%`
               : item["Product Name"] || item.title || "Product",
             images: [item["Product Image"] || item["ProductImage"]].filter(Boolean),
             metadata: {
               weight: itemWeight.toString(),
               stripePriceId: item["Stripe Price ID"] || "",
               stripeProductId: item["Stripe Product Id"] || "",
-              // ✅ DISCOUNT METADATA PER PRODUCT
-              originalPrice: (originalPrice * 1.21).toString(), // Include BTW
-              effectivePrice: (effectivePrice * 1.21).toString(), // Include BTW
-              salePrice: hasDiscount ? (salePrice * 1.21).toString() : "", // Include BTW
+              originalPrice: originalPrice.toString(), // Already includes BTW
+              effectivePrice: effectivePrice.toString(), // Already includes BTW
+              salePrice: hasDiscount ? salePrice.toString() : "", // Already includes BTW
               hasDiscount: hasDiscount.toString(),
               discountPercentage: discountPercentage.toString(),
-              itemSavings: (itemSavings * 1.21).toString() // Include BTW
+              itemSavings: itemSavings.toString() // Already includes BTW
             }
           },
-          unit_amount: unitAmount, // Price already includes BTW
+          unit_amount: unitAmount, // Already includes BTW
         },
         quantity,
       })

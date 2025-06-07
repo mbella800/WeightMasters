@@ -120,7 +120,6 @@ module.exports = async function handler(req, res) {
       const subtotal = session.amount_subtotal / 100
       const shipping = session.total_details?.amount_shipping / 100 || 0
       const total = session.amount_total / 100
-      const btw = (total - shipping) * 0.21 // BTW is 21% over subtotaal
 
       const emailPayload = {
         sender: {
@@ -138,7 +137,7 @@ module.exports = async function handler(req, res) {
           orderId: session.payment_intent,
           subtotal: subtotal.toFixed(2),
           shipping: shipping.toFixed(2),
-          tax: btw.toFixed(2),
+          tax: "0.00",  // BTW is al inbegrepen
           total: total.toFixed(2),
           shopName: "Weightmasters",
           items: lineItems.data
