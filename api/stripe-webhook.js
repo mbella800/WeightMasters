@@ -44,7 +44,7 @@ module.exports = async function handler(req, res) {
     event = stripe.webhooks.constructEvent(
       rawBody,
       sig,
-      WEBHOOK_SECRET
+      process.env.STRIPE_WEBHOOK_SECRET
     )
 
     console.log("✅ Email webhook signature verified")
