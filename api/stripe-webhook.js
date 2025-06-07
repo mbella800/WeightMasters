@@ -206,7 +206,7 @@ export default async function handler(req, res) {
       orderId: session.payment_intent,
       subtotal: (parseFloat(metadata.subtotal) / 100).toFixed(2),
       shipping: (parseFloat(shipping) / 100).toFixed(2),
-      tax: (parseFloat(metadata.tax) / 100).toFixed(2),
+      tax: "0.00", // BTW zit al in de prijzen
       total: (session.amount_total / 100).toFixed(2),
       shopName: capitalizeWords((metadata.checkoutSlug || "Webshop").replace(/-/g, " ")),
 

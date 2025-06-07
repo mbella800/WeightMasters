@@ -125,10 +125,10 @@ module.exports = async (req, res) => {
         price_data: {
           currency: "eur",
           product_data: { 
-            name: `💰 Totaal bespaard: €${(totalSavedAmount / 100).toFixed(2)} (${totalDiscountPercentage}%)`,
+            name: `💰 ${totalDiscountPercentage}% korting - €${(totalSavedAmount / 100).toFixed(2)}`,
             description: "Je bespaart met onze sale prijzen!"
           },
-          unit_amount: 0, // €0 - alleen informatief
+          unit_amount: -totalSavedAmount, // Show actual discount amount as negative
         },
         quantity: 1,
       })

@@ -55,10 +55,18 @@ export default async function handler(req, res) {
 
     try {
       const key = JSON.parse(process.env.GOOGLE_SERVICE_KEY)
+      
+      // Ensure proper newline handling in private key
+      const privateKey = key.private_key
+        .replace(/\\n/g, "\n")
+        .replace(/\n/g, "\n")
+        .trim()
+
       const auth = new google.auth.GoogleAuth({
         credentials: {
           client_email: key.client_email,
-          private_key: key.private_key,
+          private_key: privateKey,
+          type: "service_account"
         },
         scopes: ["https://www.googleapis.com/auth/spreadsheets"],
       })
