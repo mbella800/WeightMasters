@@ -93,29 +93,25 @@ module.exports = async function handler(req, res) {
         .map(item => {
           const productName = item.description || ""
           const productImage = item.price?.product?.images?.[0] || ""
-          const hasDiscount = productName.includes("🎉") && productName.includes("was €")
+          const metadata = item.price?.product?.metadata || {}
           
-          let originalPrice = item.price.unit_amount / 100
-          let discountPercentage = 0
-          
-          if (hasDiscount) {
-            const wasMatch = productName.match(/was €([\d.,]+)/)
-            if (wasMatch) {
-              originalPrice = parseFloat(wasMatch[1].replace(",", "."))
-              discountPercentage = Math.round(((originalPrice - (item.price.unit_amount / 100)) / originalPrice) * 100)
-            }
-          }
+          // Get prices from metadata
+          const currentPrice = item.price.unit_amount / 100
+          const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice
+          const hasDiscount = originalPrice > currentPrice
+          const discountPercentage = hasDiscount ? 
+            Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : 0
 
           return {
             productName: productName.replace(/🎉.*$/, "").trim(),
             productImage,
-            productPrice: (item.price.unit_amount / 100).toFixed(2),
+            productPrice: currentPrice.toFixed(2),
             originalPrice: originalPrice.toFixed(2),
             hasDiscount,
             discountPercentage,
-            itemSavings: hasDiscount ? (originalPrice - (item.price.unit_amount / 100)).toFixed(2) : "0.00",
+            itemSavings: hasDiscount ? (originalPrice - currentPrice).toFixed(2) : "0.00",
             quantity: item.quantity,
-            totalPrice: ((item.price.unit_amount / 100) * item.quantity).toFixed(2),
+            totalPrice: (currentPrice * item.quantity).toFixed(2),
             totalOriginalPrice: (originalPrice * item.quantity).toFixed(2)
           }
         })
@@ -133,11 +129,11 @@ module.exports = async function handler(req, res) {
         },
         to: [{ 
           email: customer_email,
-          name: customer_name || "Klant"
+          name: capitalizeWords(customer_name) || "Klant"
         }],
         templateId: 1,
         params: {
-          name: customer_name || "Klant",
+          name: capitalizeWords(customer_name) || "Klant",
           email: customer_email,
           orderId: session.payment_intent,
           subtotal: subtotal.toFixed(2),
@@ -145,14 +141,27 @@ module.exports = async function handler(req, res) {
           tax: btw.toFixed(2),
           total: total.toFixed(2),
           shopName: "Weightmasters",
-          items: items.map(item => ({
-            productName: item.productName,
-            productPrice: item.productPrice,
-            quantity: item.quantity,
-            originalPrice: item.hasDiscount ? item.originalPrice : null,
-            discountPercentage: item.hasDiscount ? item.discountPercentage : null,
-            productImage: item.productImage
-          })),
+          items: lineItems.data
+            .filter(item => !item.description?.includes("Verzendkosten") && !item.description?.includes("Gratis verzending"))
+            .map(item => {
+              const productName = item.description?.replace(/🎉.*$/, "").trim() || ""
+              const productImage = item.price?.product?.images?.[0] || ""
+              const metadata = item.price?.product?.metadata || {}
+              const currentPrice = item.price.unit_amount / 100
+              const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice
+              const hasDiscount = originalPrice > currentPrice
+              const discountPercentage = hasDiscount ? 
+                Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : 0
+              
+              return {
+                productName,
+                productImage,
+                productPrice: currentPrice.toFixed(2),
+                quantity: item.quantity,
+                originalPrice: hasDiscount ? originalPrice.toFixed(2) : null,
+                discountPercentage: hasDiscount ? discountPercentage : null
+              }
+            }),
           hasDiscount: itemsWithDiscount.length > 0,
           discountItems: itemsWithDiscount.map(item => ({
             productName: item.productName,
