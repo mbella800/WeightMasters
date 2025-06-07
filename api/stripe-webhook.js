@@ -35,7 +35,7 @@ export default async function handler(req, res) {
 
   // ✅ STRIPE SIGNATURE UIT HEADERS
   const sig = req.headers['stripe-signature']
-  
+
   let body
   let event
 
@@ -83,9 +83,34 @@ export default async function handler(req, res) {
     const session = event.data.object
     const metadata = session.metadata || {}
 
+    // ✅ DEBUG: LOG HELE SESSION VOOR EMAIL DEBUGGING
+    console.log("🔍 Session ID:", session.id)
+    console.log("🔍 Customer details:", JSON.stringify(session.customer_details, null, 2))
+    console.log("🔍 Customer email from session:", session.customer_details?.email)
+    console.log("🔍 Customer name from session:", session.customer_details?.name)
+
     const customer_email = session.customer_details?.email || ""
     const customer_name = session.customer_details?.name || ""
     const shipping = session.total_details?.amount_shipping || metadata.shippingFee || 0
+
+    if (!customer_email) {
+      console.error("❌ GEEN CUSTOMER EMAIL GEVONDEN!")
+      console.error("❌ Session object keys:", Object.keys(session))
+      console.error("❌ Trying alternative email sources...")
+      
+      // Probeer andere bronnen voor email
+      const altEmail = session.customer?.email || session.receipt_email || ""
+      console.log("🔍 Alternative email sources:", {
+        customer_email: session.customer?.email,
+        receipt_email: session.receipt_email
+      })
+      
+      if (!altEmail) {
+        return res.status(400).send("No customer email found in session")
+      }
+    }
+
+    console.log("📧 Final email to send to:", customer_email || "NO EMAIL FOUND")
 
     // ✅ DISCOUNT INFORMATIE UIT METADATA
     const totalOriginalValue = parseFloat(metadata.totalOriginalValue || 0) / 100
@@ -176,8 +201,15 @@ export default async function handler(req, res) {
       }
     }
 
-    // ✅ UITGEBREIDE DATA VOOR BREVO TEMPLATE
-    const data = {
+    // ❌ Reduce items array for email payload to max 10 to avoid huge Brevo params
+    const MAX_ITEMS_EMAIL = 10
+    const itemsForEmail = items.slice(0, MAX_ITEMS_EMAIL)
+
+    // ❌ Reduce discount items array too
+    const itemsWithDiscountForEmail = itemsWithDiscount.slice(0, MAX_ITEMS_EMAIL)
+
+    // Build params without heavy images to keep payload light
+    const paramsForEmail = {
       name: customer_name,
       email: customer_email,
       orderId: session.payment_intent,
@@ -186,47 +218,59 @@ export default async function handler(req, res) {
       tax: (parseFloat(metadata.tax) / 100).toFixed(2),
       total: (session.amount_total / 100).toFixed(2),
       shopName: capitalizeWords((metadata.checkoutSlug || "Webshop").replace(/-/g, " ")),
-      items,
-      
-      // ✅ NIEUWE DISCOUNT VARIABELEN VOOR BREVO TEMPLATE
+
+      // Discount summary
       hasAnyDiscount,
       totalOriginalValue: totalOriginalValue.toFixed(2),
       totalSavedAmount: totalSavedAmount.toFixed(2),
       totalDiscountPercentage,
-      itemsWithDiscount,
-      
-      // ✅ EXTRA HANDIGE VARIABELEN
+
+      // Items for Brevo template (max 10)
+      items: itemsForEmail,
+      itemsWithDiscount: itemsWithDiscountForEmail,
+
+      // Helpful extra strings
       savingsText: hasAnyDiscount ? `Je totale besparing: €${totalSavedAmount.toFixed(2)}` : "",
-      discountSummary: hasAnyDiscount ? 
-        `${totalDiscountPercentage}% korting - €${totalSavedAmount.toFixed(2)} bespaard!` : 
-        "",
+      discountSummary: hasAnyDiscount ? `${totalDiscountPercentage}% korting - €${totalSavedAmount.toFixed(2)} bespaard!` : "",
+    }
+
+    const emailPayload = {
+      sender: {
+        name: paramsForEmail.shopName,
+        email: "mailweightmasters@gmail.com",
+      },
+      to: [{ email: paramsForEmail.email, name: paramsForEmail.name }],
+      templateId: parseInt(process.env.BREVO_TEMPLATE_ID),
+      params: paramsForEmail,
     }
 
     console.log("📧 Sending email to:", customer_email)
 
     try {
+      console.log("📤 Email payload:", JSON.stringify(emailPayload, null, 2))
+      console.log("🔑 Brevo API Key:", process.env.BREVO_API_KEY ? "SET" : "NOT SET")
+      console.log("🆔 Brevo Template ID:", process.env.BREVO_TEMPLATE_ID)
+
       const response = await fetch("https://api.brevo.com/v3/smtp/email", {
         method: "POST",
         headers: {
           "api-key": process.env.BREVO_API_KEY,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          sender: {
-            name: data.shopName,
-            email: "vsnryweb@gmail.com",
-          },
-          to: [{ email: data.email, name: data.name }],
-          templateId: parseInt(process.env.BREVO_TEMPLATE_ID),
-          params: data,
-        }),
+        body: JSON.stringify(emailPayload),
       })
+
+      console.log("📬 Brevo response status:", response.status)
+      console.log("📬 Brevo response headers:", JSON.stringify([...response.headers.entries()]))
 
       if (!response.ok) {
         const errorText = await response.text()
         console.error("❌ Brevo response fout:", response.status, errorText)
+        console.error("❌ Full response:", response)
       } else {
-        console.log("✅ Bevestigingsmail verzonden naar", data.email)
+        const responseData = await response.text()
+        console.log("✅ Brevo response success:", responseData)
+        console.log("✅ Bevestigingsmail verzonden naar", paramsForEmail.email)
         // ✅ DEBUG: Log discount info
         if (hasAnyDiscount) {
           console.log(`💰 Korting verwerkt: ${totalDiscountPercentage}% (€${totalSavedAmount.toFixed(2)} bespaard)`)
@@ -234,6 +278,7 @@ export default async function handler(req, res) {
       }
     } catch (err) {
       console.error("❌ Fout bij verzenden mail via Brevo:", err.message)
+      console.error("❌ Full error:", err)
     }
   } else {
     console.log(`ℹ️ Unhandled event type: ${event.type}`)
