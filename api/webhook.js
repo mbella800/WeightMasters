@@ -84,19 +84,19 @@ module.exports = async function sheetWebhook(session, customerName, customerEmai
     const sheets = await getGoogleSheetClient()
 
     // Update the sheet with multiple rows
-    await sheets.spreadsheets.values.append({
+      await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SHEETS_ID,
       range: 'Bestellingen!A:T',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: rows,
       },
-    })
+      })
 
     console.log("✅ Bestellingen gelogd in Google Sheet")
     return true
   } catch (error) {
     console.error("❌ Error logging to sheet:", error)
     return false
-  }
+}
 } 

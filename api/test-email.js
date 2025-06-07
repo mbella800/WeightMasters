@@ -32,7 +32,7 @@ const handler = async (req, res) => {
     console.log("📬 Brevo response status:", response.status)
     const responseText = await response.text()
     console.log("📬 Brevo response:", responseText)
-
+    
     if (!response.ok) {
       throw new Error(`Failed to send email: ${responseText}`)
     }
