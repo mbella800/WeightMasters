@@ -8,7 +8,14 @@ export const config = { api: { bodyParser: false } }
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 const sheetConfigPath = path.join(__dirname, "sheet-config.json")
-const sheetConfig = JSON.parse(fs.readFileSync(sheetConfigPath, "utf-8"))
+let sheetConfig = []
+try {
+  if (fs.existsSync(sheetConfigPath)) {
+    sheetConfig = JSON.parse(fs.readFileSync(sheetConfigPath, "utf-8"))
+  }
+} catch (err) {
+  console.error("⚠️ sheet-config.json kon niet worden gelezen:", err.message)
+}
 
 const formatEuro = (value) =>
   typeof value === "string" || typeof value === "number"

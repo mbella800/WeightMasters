@@ -78,31 +78,12 @@ export default async function handler(req, res) {
 
   const sheetId = spreadsheet.data.spreadsheetId
 
-  // ✅ pad binnen de api map
-  const configPath = path.join(process.cwd(), "api", "sheet-config.json")
-  let configJson = []
-
-  try {
-    if (fs.existsSync(configPath)) {
-      configJson = JSON.parse(fs.readFileSync(configPath, "utf-8"))
-    }
-  } catch (err) {
-    console.error("❌ Fout bij lezen van sheet-config.json:", err.message)
-    return res.status(500).send("Fout bij lezen van sheet-config.json")
-  }
-
-  configJson.push({
-    checkoutSlug,
-    sheetId,
-  })
-
-  try {
-    fs.writeFileSync(configPath, JSON.stringify(configJson, null, 2))
-  } catch (err) {
-    console.error("❌ Fout bij schrijven naar sheet-config.json:", err.message)
-    return res.status(500).send("Fout bij schrijven naar sheet-config.json")
-  }
+  // In serverless omgevingen zoals Vercel kunnen we niet naar disk schrijven.
+  // Geef simpelweg het sheetId terug zodat het als ENV-var kan worden ingesteld.
 
   console.log(`✅ Nieuwe sheet aangemaakt voor ${checkoutSlug}: ${sheetId}`)
-  res.status(200).json({ message: "Nieuwe sheet aangemaakt", sheetId })
+  res.status(200).json({
+    message: "Nieuwe sheet aangemaakt. Zet deze ID in de Vercel ENV als DEFAULT_SHEET_ID of voeg hem lokaal toe aan sheet-config.json.",
+    sheetId,
+  })
 }
