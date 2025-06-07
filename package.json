@@ -4,6 +4,7 @@
   "description": "Weight Masters webshop",
   "dependencies": {
     "stripe": "^14.0.0",
-    "googleapis": "^129.0.0"
+    "googleapis": "^129.0.0",
+    "micro": "^10.0.1"
   }
 }
