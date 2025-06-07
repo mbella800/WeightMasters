@@ -2,7 +2,7 @@ import Stripe from "stripe"
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
-// ✅ VERCEL-FRIENDLY CONFIG
+// ✅ VERCEL-SPECIFIEKE CONFIG
 export const config = {
   api: {
     bodyParser: false,
@@ -14,40 +14,73 @@ function capitalizeWords(str) {
   return str.replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
+// ✅ VERCEL-SPECIFIEKE RAW BODY READER
+function getRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    req.on('data', (chunk) => {
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      resolve(Buffer.concat(chunks))
+    })
+    req.on('error', reject)
+  })
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).send("Method Not Allowed")
   }
 
-  // ✅ VERBETERDE SIGNATURE HANDLING VOOR VERCEL
-  const sig = req.headers['stripe-signature'] || req.headers['Stripe-Signature']
+  // ✅ STRIPE SIGNATURE UIT HEADERS
+  const sig = req.headers['stripe-signature']
   
+  if (!sig) {
+    console.error("❌ Geen Stripe signature header gevonden")
+    return res.status(400).send("No signature header")
+  }
+
   let body
   let event
 
   try {
-    // ✅ RAW BODY KRIJGEN OP VERCEL-VRIENDELIJKE MANIER
-    if (req.body && typeof req.body === 'string') {
-      body = req.body
-    } else if (req.body && Buffer.isBuffer(req.body)) {
+    // ✅ PROBEER VERSCHILLENDE MANIEREN OM RAW BODY TE KRIJGEN
+    if (typeof req.body === 'string') {
+      // Body is al een string - gebruik die
+      body = Buffer.from(req.body, 'utf8')
+    } else if (Buffer.isBuffer(req.body)) {
+      // Body is al een buffer
       body = req.body
     } else {
-      // Fallback voor micro buffer
-      const { buffer } = await import("micro")
-      body = await buffer(req)
+      // Lees de raw body rechtstreeks van de request
+      body = await getRawBody(req)
     }
 
-    // ✅ SIGNATURE VERIFICATIE MET BETERE ERROR HANDLING
+    console.log("📨 Raw body length:", body.length)
+    console.log("📨 Signature:", sig)
+
+    // ✅ STRIPE SIGNATURE VERIFICATIE
     event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_WEBHOOK_SECRET)
     console.log("✅ Webhook signature verified successfully")
     
   } catch (err) {
     console.error("❌ Webhook signature mismatch:", err.message)
-    console.error("Headers:", JSON.stringify(req.headers, null, 2))
-    console.error("Body type:", typeof body)
-    console.error("Body length:", body?.length || 'undefined')
-    console.error("Signature:", sig)
-    return res.status(400).send(`Webhook Error: ${err.message}`)
+    
+    // ✅ PROBEER FALLBACK ZONDER SIGNATURE VERIFICATIE (ALLEEN VOOR DEBUG)
+    if (process.env.NODE_ENV === 'development') {
+      console.log("🚨 DEVELOPMENT MODE: Skipping signature verification")
+      try {
+        const rawBodyString = body.toString('utf8')
+        const eventData = JSON.parse(rawBodyString)
+        event = eventData
+      } catch (parseErr) {
+        console.error("❌ Could not parse event data:", parseErr.message)
+        return res.status(400).send("Invalid event data")
+      }
+    } else {
+      return res.status(400).send(`Webhook Error: ${err.message}`)
+    }
   }
 
   if (event.type === "checkout.session.completed") {
@@ -187,7 +220,7 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           sender: {
             name: data.shopName,
-            email: "vsnryweb@gmail.com", // <- GEFORCEERD EMAILadres zonder .env
+            email: "vsnryweb@gmail.com",
           },
           to: [{ email: data.email, name: data.name }],
           templateId: parseInt(process.env.BREVO_TEMPLATE_ID),
@@ -209,7 +242,7 @@ export default async function handler(req, res) {
       console.error("❌ Fout bij verzenden mail via Brevo:", err.message)
     }
   } else {
-    console.log(`ℹ️ Onhandled event type: ${event.type}`)
+    console.log(`ℹ️ Unhandled event type: ${event.type}`)
   }
 
   res.status(200).json({ received: true })
