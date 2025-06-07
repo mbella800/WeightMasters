@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   const { checkoutSlug } = req.query
 
   if (!checkoutSlug) {
-    return res.status(400).send("checkoutSlug ontbreekt")
+    return res.status(400).send("❌ checkoutSlug ontbreekt")
   }
 
   let serviceKey
@@ -27,61 +27,82 @@ export default async function handler(req, res) {
 
   const sheets = google.sheets({ version: "v4", auth })
 
-  const spreadsheet = await sheets.spreadsheets.create({
-    requestBody: {
-      properties: {
-        title: `Orders - ${checkoutSlug}`,
-      },
-      sheets: [
-        {
-          properties: { title: "Bestellingen" },
-          data: [
-            {
-              startRow: 0,
-              startColumn: 0,
-              rowData: [
-                {
-                  values: [
-                    { userEnteredValue: { stringValue: "Datum" } },
-                    { userEnteredValue: { stringValue: "Ordernummer" } },
-                    { userEnteredValue: { stringValue: "Naam" } },
-                    { userEnteredValue: { stringValue: "E-mail" } },
-                    { userEnteredValue: { stringValue: "Telefoon" } },
-                    { userEnteredValue: { stringValue: "Land" } },
-                    { userEnteredValue: { stringValue: "Stad" } },
-                    { userEnteredValue: { stringValue: "Postcode" } },
-                    { userEnteredValue: { stringValue: "Adres" } },
-                    { userEnteredValue: { stringValue: "Totaalbedrag" } },
-                    { userEnteredValue: { stringValue: "Subtotaal" } },
-                    { userEnteredValue: { stringValue: "Verzendkosten" } },
-                    { userEnteredValue: { stringValue: "BTW" } },
-                    { userEnteredValue: { stringValue: "Order verwerkt" } },
-                    { userEnteredValue: { stringValue: "Bevestigingsmail verzonden" } },
-                    { userEnteredValue: { stringValue: "Track & Trace" } },
-                    { userEnteredValue: { stringValue: "Verzendmethode" } },
-                    { userEnteredValue: { stringValue: "Bestelde producten" } },
-                  ],
-                },
-              ],
-            },
-          ],
+  let spreadsheet
+  try {
+    spreadsheet = await sheets.spreadsheets.create({
+      requestBody: {
+        properties: {
+          title: `Orders - ${checkoutSlug}`,
         },
-      ],
-    },
-  })
+        sheets: [
+          {
+            properties: { title: "Bestellingen" },
+            data: [
+              {
+                startRow: 0,
+                startColumn: 0,
+                rowData: [
+                  {
+                    values: [
+                      { userEnteredValue: { stringValue: "Datum" } },
+                      { userEnteredValue: { stringValue: "Ordernummer" } },
+                      { userEnteredValue: { stringValue: "Naam" } },
+                      { userEnteredValue: { stringValue: "E-mail" } },
+                      { userEnteredValue: { stringValue: "Telefoon" } },
+                      { userEnteredValue: { stringValue: "Land" } },
+                      { userEnteredValue: { stringValue: "Stad" } },
+                      { userEnteredValue: { stringValue: "Postcode" } },
+                      { userEnteredValue: { stringValue: "Adres" } },
+                      { userEnteredValue: { stringValue: "Totaalbedrag" } },
+                      { userEnteredValue: { stringValue: "Subtotaal" } },
+                      { userEnteredValue: { stringValue: "Verzendkosten" } },
+                      { userEnteredValue: { stringValue: "BTW" } },
+                      { userEnteredValue: { stringValue: "Order verwerkt" } },
+                      { userEnteredValue: { stringValue: "Bevestigingsmail verzonden" } },
+                      { userEnteredValue: { stringValue: "Track & Trace" } },
+                      { userEnteredValue: { stringValue: "Verzendmethode" } },
+                      { userEnteredValue: { stringValue: "Bestelde producten" } },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    })
+  } catch (err) {
+    console.error("❌ Spreadsheet aanmaken mislukt:", err.message)
+    return res.status(500).send("Spreadsheet aanmaken mislukt")
+  }
 
   const sheetId = spreadsheet.data.spreadsheetId
 
-  // sheet-config.json bijwerken
+  // ✅ pad binnen de api map
   const configPath = path.join(process.cwd(), "api", "sheet-config.json")
-  const configJson = JSON.parse(fs.readFileSync(configPath, "utf-8"))
+  let configJson = []
+
+  try {
+    if (fs.existsSync(configPath)) {
+      configJson = JSON.parse(fs.readFileSync(configPath, "utf-8"))
+    }
+  } catch (err) {
+    console.error("❌ Fout bij lezen van sheet-config.json:", err.message)
+    return res.status(500).send("Fout bij lezen van sheet-config.json")
+  }
 
   configJson.push({
     checkoutSlug,
     sheetId,
   })
 
-  fs.writeFileSync(configPath, JSON.stringify(configJson, null, 2))
+  try {
+    fs.writeFileSync(configPath, JSON.stringify(configJson, null, 2))
+  } catch (err) {
+    console.error("❌ Fout bij schrijven naar sheet-config.json:", err.message)
+    return res.status(500).send("Fout bij schrijven naar sheet-config.json")
+  }
 
+  console.log(`✅ Nieuwe sheet aangemaakt voor ${checkoutSlug}: ${sheetId}`)
   res.status(200).json({ message: "Nieuwe sheet aangemaakt", sheetId })
 }
