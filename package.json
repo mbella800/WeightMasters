@@ -2,16 +2,7 @@
   "name": "weightmasters",
   "version": "1.0.0",
   "description": "Weight Masters webshop",
-  "main": "index.js",
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
-  },
   "dependencies": {
-    "next": "^14.0.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
     "stripe": "^14.0.0",
     "googleapis": "^129.0.0"
   }
