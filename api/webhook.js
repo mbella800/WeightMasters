@@ -1,126 +1,79 @@
-import { buffer } from "micro"
-import Stripe from "stripe"
-import { google } from "googleapis"
-const fs = require("fs")
-const path = require("path")
+const { google } = require('googleapis')
 
-export const config = { api: { bodyParser: false } }
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
-const sheetConfigPath = path.join(__dirname, "sheet-config.json")
-let sheetConfig = []
-try {
-  if (fs.existsSync(sheetConfigPath)) {
-    sheetConfig = JSON.parse(fs.readFileSync(sheetConfigPath, "utf-8"))
-  }
-} catch (err) {
-  console.error("⚠️ sheet-config.json kon niet worden gelezen:", err.message)
+async function getGoogleSheetClient() {
+  const auth = new google.auth.GoogleAuth({
+    credentials: JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS),
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  })
+  return google.sheets({ version: 'v4', auth })
 }
 
-const formatEuro = (value) =>
-  typeof value === "string" || typeof value === "number"
-    ? `€${(parseFloat(value) / 100).toFixed(2).replace(".", ",")}`
-    : ""
-
-export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).send("Method Not Allowed")
-
-  const sig = req.headers["stripe-signature"]
-  const buf = await buffer(req)
-
-  let event
+module.exports = async function sheetWebhook(session, customerName, customerEmail, customerPhone, country, city, postalCode, address, emailSent) {
   try {
-    event = stripe.webhooks.constructEvent(
-      buf,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET_SHEET
-    )
-  } catch (err) {
-    console.error("❌ Webhook signature mismatch:", err.message)
-    return res.status(400).send(`Webhook Error: ${err.message}`)
-  }
-
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object
+    // Get values from metadata and session
     const metadata = session.metadata || {}
-    const checkoutSlug = metadata.checkoutSlug || "default"
+    const hasAnyDiscount = metadata.hasAnyDiscount === "true"
+    const totalOriginalValue = parseFloat(metadata.totalOriginalValue || 0) / 100
+    const totalSavedAmount = parseFloat(metadata.totalSavedAmount || 0) / 100
+    const totalDiscountPercentage = parseInt(metadata.totalDiscountPercentage || 0)
+    const shipping = session.total_details?.amount_shipping || 0
+    const subtotal = session.amount_subtotal / 100
+    const total = session.amount_total / 100
+    const btw = total - subtotal - (shipping / 100)
 
-    const sheetEntry = sheetConfig.find((entry) => entry.checkoutSlug === checkoutSlug)
-    const sheetId = sheetEntry?.sheetId || process.env.DEFAULT_SHEET_ID
-
-    if (!sheetId) {
-      console.error("❌ Geen sheetId gevonden voor:", checkoutSlug)
-      return res.status(400).send("Geen sheetId gevonden en DEFAULT_SHEET_ID niet ingesteld")
+    const formatDate = (date) => {
+      return new Intl.DateTimeFormat('nl-NL', {
+        day: 'numeric',
+        month: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      }).format(date)
     }
 
-    try {
-      const key = JSON.parse(process.env.GOOGLE_SERVICE_KEY)
-      
-      // Ensure proper newline handling in private key
-      const privateKey = key.private_key
-        .replace(/\\n/g, "\n")
-        .replace(/\n/g, "\n")
-        .trim()
-
-      const auth = new google.auth.GoogleAuth({
-        credentials: {
-          client_email: key.client_email,
-          private_key: privateKey,
-          type: "service_account"
-        },
-        scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-      })
-
-      const sheets = google.sheets({ version: "v4", auth })
-      const customer = session.customer_details || {}
-      const date = new Date().toLocaleString("nl-NL", {
-        timeZone: "Europe/Amsterdam",
-      })
-
-      const items = JSON.parse(metadata.items || "[]")
-      const itemList = items
-        .map(
-          (item) =>
-            `${item.title || item.ProductName} (€${parseFloat(item.productPrice).toFixed(2)} × ${item.quantity})`
-        )
-        .join(", ")
-
-      const row = [
-        date,
-        metadata.orderId || session.payment_intent || "",
-        customer.name || "",
-        customer.email || "",
-        customer.phone || "",
-        customer.address?.country || "",
-        customer.address?.city || "",
-        customer.address?.postal_code || "",
-        customer.address?.line1 || "",
-        formatEuro(metadata.total),
-        formatEuro(metadata.subtotal),
-        formatEuro(metadata.shippingFee),
-        formatEuro(metadata.tax),
-        "", // Order verwerkt
-        "✅", // Bevestigingsmail verzonden
-        "", // Track & Trace
-        metadata.shippingMethod || "",
-        itemList,
-      ]
-
-      console.log("👉 Row contents:", row)
-
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: sheetId,
-        range: "'Bestellingen'!A2:R",
-        valueInputOption: "USER_ENTERED",
-        requestBody: { values: [row] },
-      })
-
-      console.log("✅ Bestelling gelogd in Google Sheet")
-    } catch (err) {
-      console.error("❌ Google Sheets fout:", err.message)
-      return res.status(500).send("Google Sheets fout")
+    const formatPrice = (amount) => {
+      return `€${amount.toFixed(2)}`.replace('.', ',')
     }
+
+    const row = [
+      formatDate(new Date()),  // Datum
+      metadata.orderId || session.id,  // Order ID
+      customerName,
+      customerEmail,
+      customerPhone,
+      country,
+      city,
+      postalCode,
+      address,
+      formatPrice(total),  // Totaalbedrag
+      hasAnyDiscount ? formatPrice(totalOriginalValue) : formatPrice(subtotal),  // Originele prijs
+      formatPrice(shipping / 100),  // Verzendkosten
+      hasAnyDiscount ? 
+        `${totalDiscountPercentage}% korting (€${totalSavedAmount.toFixed(2)})`.replace('.', ',') : 
+        "incl. 21% BTW",  // Korting of BTW info
+      "✅",  // Order verwerkt
+      emailSent ? "✅" : "❌",  // Email status
+      session.payment_status  // Betaalstatus
+    ]
+
+    console.log("👉 Row contents:", row)
+
+    const sheets = await getGoogleSheetClient()
+    
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: process.env.GOOGLE_SHEETS_ID,
+      range: 'Bestellingen!A:P',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: [row],
+      },
+    })
+
+    console.log("✅ Bestelling gelogd in Google Sheet")
+    return true
+  } catch (error) {
+    console.error("❌ Error logging to sheet:", error)
+    return false
   }
-
-  res.status(200).json({ received: true })
-}
+} 
