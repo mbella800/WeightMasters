@@ -1,5 +1,11 @@
-const stripe = require('stripe')(process.env.STRIPE_WEBHOOK_SECRET_SHEET)
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const { google } = require('googleapis')
+
+// Check for webhook secret
+const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET_SHEET
+if (!WEBHOOK_SECRET) {
+  console.error("❌ Missing STRIPE_WEBHOOK_SECRET_SHEET environment variable")
+}
 
 exports.config = {
   api: {
@@ -146,7 +152,7 @@ module.exports = async function handler(req, res) {
     event = stripe.webhooks.constructEvent(
       rawBody,
       sig,
-      process.env.STRIPE_WEBHOOK_SECRET_SHEET
+      WEBHOOK_SECRET
     )
 
     const result = await sheetWebhook(event)

@@ -1,5 +1,5 @@
 const Stripe = require("stripe")
-const stripe = new Stripe(process.env.STRIPE_WEBHOOK_SECRET)
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
 // Webhook secret voor email notifications
 const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET
@@ -44,7 +44,7 @@ module.exports = async function handler(req, res) {
     event = stripe.webhooks.constructEvent(
       rawBody,
       sig,
-      process.env.STRIPE_WEBHOOK_SECRET
+      WEBHOOK_SECRET
     )
 
     console.log("✅ Email webhook signature verified")
