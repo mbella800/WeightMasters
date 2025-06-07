@@ -119,21 +119,6 @@ module.exports = async (req, res) => {
     const totalDiscountPercentage = totalOriginalValue > 0 ? 
       Math.round((totalSavedAmount / totalOriginalValue) * 100) : 0
 
-    // ✅ VOEG BESPARING SAMENVATTING TOE (€0 informatieve regel)
-    if (totalSavedAmount > 0) {
-      line_items.push({
-        price_data: {
-          currency: "eur",
-          product_data: { 
-            name: `💰 Je bespaart €${(totalSavedAmount / 100).toFixed(2)} (${totalDiscountPercentage}% korting)`,
-            description: "Korting is al verwerkt in de productprijs"
-          },
-          unit_amount: 0, // Must be 0 or positive for Stripe
-        },
-        quantity: 1,
-      })
-    }
-
     // Calculate shipping costs exactly like in CartShippingEstimate
     let shippingFee = 0
     const subtotalBeforeTax = subtotal / 1.21 / 100 // Convert back to pre-tax amount for threshold check

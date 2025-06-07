@@ -114,57 +114,27 @@ export default async function handler(req, res) {
 
     try {
       // ✅ KRIJG ITEMS UIT STRIPE LINE_ITEMS IN PLAATS VAN METADATA
-      const lineItems = await stripe.checkout.sessions.listLineItems(session.id, {
-        expand: ['data.price.product']
-      })
-      
-      items = lineItems.data
-        .filter(item => {
-          // Filter out BTW, shipping, and discount summary items
-          const name = item.price?.product?.name || item.description || ""
-          return !name.includes("BTW") && 
-                 !name.includes("Verzendkosten") && 
-                 !name.includes("Gratis verzending") &&
-                 !name.includes("Totaal bespaard")
-        })
-        .map((item) => {
-          const productName = item.price?.product?.name || item.description || ""
-          const productImage = item.price?.product?.images?.[0] || ""
-          const unitAmount = item.price?.unit_amount || 0
-          const quantity = item.quantity || 1
-          
-          // ✅ DETECTEER KORTING UIT PRODUCTNAAM
-          const hasDiscount = productName.includes("🎉") && productName.includes("was €")
-          let originalPrice = unitAmount / 100
-          let discountPercentage = 0
-          let itemSavings = 0
-          
-          if (hasDiscount) {
-            // Probeer originele prijs uit naam te extraheren: "Product 🎉 -13% (was €79.95)"
-            const wasMatch = productName.match(/was €([\d.]+)\)/)
-            if (wasMatch) {
-              originalPrice = parseFloat(wasMatch[1])
-              itemSavings = (originalPrice - (unitAmount / 100)) * quantity
-              discountPercentage = Math.round(((originalPrice - (unitAmount / 100)) / originalPrice) * 100)
-            }
-          }
-          
-          return {
-            productName: productName.replace(/🎉.*$/, '').trim(), // Clean product name
-            productImage,
-            productPrice: (unitAmount / 100).toFixed(2),
-            originalPrice: originalPrice.toFixed(2),
-            hasDiscount,
-            discountPercentage,
-            itemSavings: itemSavings.toFixed(2),
-            quantity,
-            totalPrice: ((unitAmount / 100) * quantity).toFixed(2),
-            totalOriginalPrice: (originalPrice * quantity).toFixed(2),
-          }
-        })
+      const lineItems = session.line_items.data.map(item => ({
+        productName: item.description,
+        productImage: item.price?.product?.images?.[0] || "",
+        productPrice: (item.price.unit_amount / 100).toFixed(2),
+        originalPrice: item.price.unit_amount_original ? 
+          (item.price.unit_amount_original / 100).toFixed(2) : 
+          (item.price.unit_amount / 100).toFixed(2),
+        hasDiscount: item.price.unit_amount_original ? true : false,
+        discountPercentage: item.price.unit_amount_original ? 
+          Math.round(((item.price.unit_amount_original - item.price.unit_amount) / item.price.unit_amount_original) * 100) : 0,
+        itemSavings: item.price.unit_amount_original ? 
+          ((item.price.unit_amount_original - item.price.unit_amount) / 100).toFixed(2) : "0.00",
+        quantity: item.quantity,
+        totalPrice: ((item.price.unit_amount * item.quantity) / 100).toFixed(2),
+        totalOriginalPrice: item.price.unit_amount_original ? 
+          ((item.price.unit_amount_original * item.quantity) / 100).toFixed(2) : 
+          ((item.price.unit_amount * item.quantity) / 100).toFixed(2)
+      }))
 
-      // ✅ ITEMS MET KORTING VOOR TEMPLATE
-      itemsWithDiscount = items.filter(item => item.hasDiscount)
+      // Filter out items with actual discounts for the discount summary
+      itemsWithDiscount = lineItems.filter(item => item.hasDiscount)
       
     } catch (err) {
       console.error("❌ Kon line items niet ophalen:", err.message)
@@ -206,7 +176,7 @@ export default async function handler(req, res) {
       orderId: session.payment_intent,
       subtotal: (parseFloat(metadata.subtotal) / 100).toFixed(2),
       shipping: (parseFloat(shipping) / 100).toFixed(2),
-      tax: "0.00", // BTW zit al in de prijzen
+      tax: "incl. 21% BTW", // Updated to show included VAT
       total: (session.amount_total / 100).toFixed(2),
       shopName: capitalizeWords((metadata.checkoutSlug || "Webshop").replace(/-/g, " ")),
 
@@ -228,14 +198,14 @@ export default async function handler(req, res) {
     const emailPayload = {
       sender: {
         name: paramsForEmail.shopName,
-        email: "noreply@brevo.com",
+        email: "mailweightmasters@gmail.com",
       },
       replyTo: {
         name: paramsForEmail.shopName,
         email: "mailweightmasters@gmail.com",
       },
       to: [{ email: paramsForEmail.email, name: paramsForEmail.name }],
-      templateId: parseInt(process.env.BREVO_TEMPLATE_ID),
+      templateId: 1,
       params: paramsForEmail,
     }
 
