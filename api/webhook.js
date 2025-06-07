@@ -280,7 +280,7 @@ module.exports = async function handler(req, res) {
     event = stripe.webhooks.constructEvent(
       rawBody,
       sig,
-      WEBHOOK_SECRET
+      process.env.STRIPE_WEBHOOK_SECRET_SHEET
     )
 
     console.log("✅ Sheet webhook signature verified")
