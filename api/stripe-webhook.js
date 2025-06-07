@@ -218,57 +218,65 @@ export default async function handler(req, res) {
 
     const emailPayload = {
       sender: {
-        name: paramsForEmail.shopName,
-        email: "mailweightmasters@gmail.com",
+        name: "Weightmasters",
+        email: "mailweightmasters@gmail.com"
       },
       replyTo: {
-        name: paramsForEmail.shopName,
-        email: "mailweightmasters@gmail.com",
+        name: "Weightmasters",
+        email: "mailweightmasters@gmail.com"
       },
-      to: [{ email: paramsForEmail.email, name: paramsForEmail.name }],
+      to: [{ 
+        email: customer_email,
+        name: customer_name
+      }],
       templateId: 1,
-      params: paramsForEmail,
+      params: {
+        ...paramsForEmail,
+        items: itemsWithDiscount, // Use itemsWithDiscount for both arrays to ensure items are shown
+        itemsWithDiscount: itemsWithDiscount
+      }
     }
 
     console.log("📧 Sending email to:", customer_email)
+    console.log("📤 Email payload:", JSON.stringify(emailPayload, null, 2))
 
     try {
-      console.log("📤 Email payload:", JSON.stringify(emailPayload, null, 2))
-      console.log("🔑 Brevo API Key:", process.env.BREVO_API_KEY ? "SET" : "NOT SET")
-      console.log("🆔 Brevo Template ID:", process.env.BREVO_TEMPLATE_ID)
-
       const response = await fetch("https://api.brevo.com/v3/smtp/email", {
         method: "POST",
         headers: {
           "api-key": process.env.BREVO_API_KEY,
           "Content-Type": "application/json",
+          "Accept": "application/json"
         },
-        body: JSON.stringify(emailPayload),
+        body: JSON.stringify(emailPayload)
       })
 
       console.log("📬 Brevo response status:", response.status)
-      console.log("📬 Brevo response headers:", JSON.stringify([...response.headers.entries()]))
+      const responseText = await response.text()
+      console.log("📬 Brevo raw response:", responseText)
+      
+      let responseData
+      try {
+        responseData = JSON.parse(responseText)
+        console.log("✅ Brevo parsed response:", responseData)
+      } catch (e) {
+        console.log("⚠️ Could not parse Brevo response as JSON")
+      }
 
       if (!response.ok) {
-        const errorText = await response.text()
-        console.error("❌ Brevo response fout:", response.status, errorText)
-        console.error("❌ Full response:", response)
-      } else {
-        const responseData = await response.text()
-        console.log("✅ Brevo response success:", responseData)
-        console.log("✅ Bevestigingsmail verzonden naar", paramsForEmail.email)
-        // ✅ DEBUG: Log discount info
-        if (hasAnyDiscount) {
-          console.log(`💰 Korting verwerkt: ${totalDiscountPercentage}% (€${totalSavedAmount.toFixed(2)} bespaard)`)
-        }
+        throw new Error(`Email sending failed with status ${response.status}: ${responseText}`)
       }
+
+      console.log("✅ Bevestigingsmail verzonden naar", customer_email)
+      if (hasAnyDiscount) {
+        console.log(`💰 Korting verwerkt: ${totalDiscountPercentage}% (€${totalSavedAmount.toFixed(2)} bespaard)`)
+      }
+      
+      return true // Email sent successfully
     } catch (err) {
-      console.error("❌ Fout bij verzenden mail via Brevo:", err.message)
+      console.error("❌ Error sending email:", err)
       console.error("❌ Full error:", err)
+      return false // Email sending failed
     }
   } else {
-    console.log(`ℹ️ Unhandled event type: ${event.type}`)
-  }
-
-  res.status(200).json({ received: true })
-}
+    console.log(`
