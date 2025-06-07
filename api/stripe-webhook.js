@@ -1,8 +1,8 @@
 import Stripe from "stripe"
-import { buffer } from "micro"
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
+// ✅ VERCEL-FRIENDLY CONFIG
 export const config = {
   api: {
     bodyParser: false,
@@ -19,19 +19,40 @@ export default async function handler(req, res) {
     return res.status(405).send("Method Not Allowed")
   }
 
-  const sig = req.headers["stripe-signature"]
-  const buf = await buffer(req)
-
+  // ✅ VERBETERDE SIGNATURE HANDLING VOOR VERCEL
+  const sig = req.headers['stripe-signature'] || req.headers['Stripe-Signature']
+  
+  let body
   let event
 
   try {
-    event = stripe.webhooks.constructEvent(buf, sig, process.env.STRIPE_WEBHOOK_SECRET)
+    // ✅ RAW BODY KRIJGEN OP VERCEL-VRIENDELIJKE MANIER
+    if (req.body && typeof req.body === 'string') {
+      body = req.body
+    } else if (req.body && Buffer.isBuffer(req.body)) {
+      body = req.body
+    } else {
+      // Fallback voor micro buffer
+      const { buffer } = await import("micro")
+      body = await buffer(req)
+    }
+
+    // ✅ SIGNATURE VERIFICATIE MET BETERE ERROR HANDLING
+    event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_WEBHOOK_SECRET)
+    console.log("✅ Webhook signature verified successfully")
+    
   } catch (err) {
     console.error("❌ Webhook signature mismatch:", err.message)
+    console.error("Headers:", JSON.stringify(req.headers, null, 2))
+    console.error("Body type:", typeof body)
+    console.error("Body length:", body?.length || 'undefined')
+    console.error("Signature:", sig)
     return res.status(400).send(`Webhook Error: ${err.message}`)
   }
 
   if (event.type === "checkout.session.completed") {
+    console.log("🎯 Processing checkout.session.completed event")
+    
     const session = event.data.object
     const metadata = session.metadata || {}
 
@@ -154,6 +175,8 @@ export default async function handler(req, res) {
         "",
     }
 
+    console.log("📧 Sending email to:", customer_email)
+
     try {
       const response = await fetch("https://api.brevo.com/v3/smtp/email", {
         method: "POST",
@@ -185,6 +208,8 @@ export default async function handler(req, res) {
     } catch (err) {
       console.error("❌ Fout bij verzenden mail via Brevo:", err.message)
     }
+  } else {
+    console.log(`ℹ️ Onhandled event type: ${event.type}`)
   }
 
   res.status(200).json({ received: true })
