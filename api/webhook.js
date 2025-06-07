@@ -1,4 +1,4 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
+const stripe = require('stripe')(process.env.STRIPE_WEBHOOK_SECRET_SHEET)
 const { google } = require('googleapis')
 
 exports.config = {
