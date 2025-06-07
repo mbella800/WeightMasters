@@ -113,52 +113,73 @@ export default async function handler(req, res) {
     let itemsWithDiscount = []
 
     try {
-      // ✅ KRIJG ITEMS UIT STRIPE LINE_ITEMS IN PLAATS VAN METADATA
-      const lineItems = session.line_items.data.map(item => ({
-        productName: item.description,
-        productImage: item.price?.product?.images?.[0] || "",
-        productPrice: (item.price.unit_amount / 100).toFixed(2),
-        originalPrice: item.price.unit_amount_original ? 
-          (item.price.unit_amount_original / 100).toFixed(2) : 
-          (item.price.unit_amount / 100).toFixed(2),
-        hasDiscount: item.price.unit_amount_original ? true : false,
-        discountPercentage: item.price.unit_amount_original ? 
-          Math.round(((item.price.unit_amount_original - item.price.unit_amount) / item.price.unit_amount_original) * 100) : 0,
-        itemSavings: item.price.unit_amount_original ? 
-          ((item.price.unit_amount_original - item.price.unit_amount) / 100).toFixed(2) : "0.00",
-        quantity: item.quantity,
-        totalPrice: ((item.price.unit_amount * item.quantity) / 100).toFixed(2),
-        totalOriginalPrice: item.price.unit_amount_original ? 
-          ((item.price.unit_amount_original * item.quantity) / 100).toFixed(2) : 
-          ((item.price.unit_amount * item.quantity) / 100).toFixed(2)
-      }))
+      // ✅ KRIJG ITEMS UIT STRIPE SESSION
+      const lineItems = await stripe.checkout.sessions.listLineItems(
+        session.id,
+        { expand: ['data.price.product'] }
+      )
+
+      console.log("📦 Retrieved line items:", JSON.stringify(lineItems, null, 2))
+
+      const items = lineItems.data
+        .filter(item => {
+          const name = item.description || ""
+          return !name.includes("Verzendkosten") && !name.includes("Gratis verzending")
+        })
+        .map(item => {
+          const productName = item.description || ""
+          const productImage = item.price?.product?.images?.[0] || ""
+          const hasDiscount = productName.includes("🎉") && productName.includes("was €")
+          
+          // Extract original price from product name if discounted
+          let originalPrice = item.price.unit_amount / 100
+          let discountPercentage = 0
+          
+          if (hasDiscount) {
+            const wasMatch = productName.match(/was €([\d.,]+)/)
+            if (wasMatch) {
+              originalPrice = parseFloat(wasMatch[1].replace(",", "."))
+              discountPercentage = Math.round(((originalPrice - (item.price.unit_amount / 100)) / originalPrice) * 100)
+            }
+          }
+
+          return {
+            productName: productName.replace(/🎉.*$/, "").trim(),
+            productImage,
+            productPrice: (item.price.unit_amount / 100).toFixed(2),
+            originalPrice: originalPrice.toFixed(2),
+            hasDiscount,
+            discountPercentage,
+            itemSavings: hasDiscount ? (originalPrice - (item.price.unit_amount / 100)).toFixed(2) : "0.00",
+            quantity: item.quantity,
+            totalPrice: ((item.price.unit_amount / 100) * item.quantity).toFixed(2),
+            totalOriginalPrice: (originalPrice * item.quantity).toFixed(2)
+          }
+        })
 
       // Filter out items with actual discounts for the discount summary
-      itemsWithDiscount = lineItems.filter(item => item.hasDiscount)
+      itemsWithDiscount = items.filter(item => item.hasDiscount)
       
     } catch (err) {
       console.error("❌ Kon line items niet ophalen:", err.message)
+      console.error("❌ Full error:", err)
       
-      // ✅ FALLBACK: simpele items uit productNames metadata
-      try {
-        const productNames = metadata.productNames || ""
-        if (productNames) {
-          const names = productNames.split(", ")
-          items = names.map(name => ({
-            productName: name,
-            productImage: "",
-            productPrice: "0.00",
-            originalPrice: "0.00",
-            hasDiscount: false,
-            discountPercentage: 0,
-            itemSavings: "0.00",
-            quantity: 1,
-            totalPrice: "0.00",
-            totalOriginalPrice: "0.00",
-          }))
-        }
-      } catch (fallbackErr) {
-        console.error("❌ Fallback parsing ook gefaald:", fallbackErr.message)
+      // Fallback to using metadata
+      const productNames = metadata.productNames || ""
+      items = []
+      if (productNames) {
+        items = [{
+          productName: productNames.split(", ")[0],
+          productImage: "",
+          productPrice: (session.amount_subtotal / 100).toFixed(2),
+          originalPrice: totalOriginalValue.toFixed(2),
+          hasDiscount: hasAnyDiscount,
+          discountPercentage: totalDiscountPercentage,
+          itemSavings: totalSavedAmount.toFixed(2),
+          quantity: 1,
+          totalPrice: (session.amount_subtotal / 100).toFixed(2),
+          totalOriginalPrice: totalOriginalValue.toFixed(2)
+        }]
       }
     }
 
