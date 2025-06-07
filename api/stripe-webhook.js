@@ -121,6 +121,10 @@ module.exports = async function handler(req, res) {
         })
 
       const itemsWithDiscount = items.filter(item => item.hasDiscount)
+      const subtotal = session.amount_subtotal / 100
+      const shipping = session.total_details?.amount_shipping / 100 || 0
+      const total = session.amount_total / 100
+      const btw = (total - shipping) * 0.21 // BTW is 21% over subtotaal
 
       const emailPayload = {
         sender: {
@@ -136,10 +140,10 @@ module.exports = async function handler(req, res) {
           name: customer_name || "Klant",
           email: customer_email,
           orderId: session.payment_intent,
-          subtotal: (session.amount_subtotal / 100).toFixed(2),
-          shipping: (session.total_details.amount_shipping / 100).toFixed(2),
-          tax: ((session.amount_total - session.amount_subtotal - session.total_details.amount_shipping) / 100).toFixed(2),
-          total: (session.amount_total / 100).toFixed(2),
+          subtotal: subtotal.toFixed(2),
+          shipping: shipping.toFixed(2),
+          tax: btw.toFixed(2),
+          total: total.toFixed(2),
           shopName: "Weightmasters",
           items: items.map(item => ({
             productName: item.productName,
@@ -157,7 +161,8 @@ module.exports = async function handler(req, res) {
             savedAmount: item.itemSavings,
             discountPercentage: item.discountPercentage
           })),
-          totalSaved: itemsWithDiscount.reduce((sum, item) => sum + parseFloat(item.itemSavings), 0).toFixed(2)
+          totalSaved: itemsWithDiscount.reduce((sum, item) => 
+            sum + (parseFloat(item.itemSavings) * item.quantity), 0).toFixed(2)
         }
       }
 

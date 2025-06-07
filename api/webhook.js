@@ -16,10 +16,10 @@ module.exports = async function sheetWebhook(session, customerName, customerEmai
     const totalOriginalValue = parseFloat(metadata.totalOriginalValue || 0) / 100
     const totalSavedAmount = parseFloat(metadata.totalSavedAmount || 0) / 100
     const totalDiscountPercentage = parseInt(metadata.totalDiscountPercentage || 0)
-    const shipping = session.total_details?.amount_shipping || 0
     const subtotal = session.amount_subtotal / 100
+    const shipping = session.total_details?.amount_shipping / 100 || 0
     const total = session.amount_total / 100
-    const btw = total - subtotal - (shipping / 100)
+    const btw = (total - shipping) * 0.21 // BTW is 21% over subtotaal
 
     const formatDate = (date) => {
       return new Intl.DateTimeFormat('nl-NL', {
@@ -48,13 +48,11 @@ module.exports = async function sheetWebhook(session, customerName, customerEmai
       address,
       formatPrice(total),  // Totaalbedrag
       hasAnyDiscount ? formatPrice(totalOriginalValue) : formatPrice(subtotal),  // Originele prijs
-      formatPrice(shipping / 100),  // Verzendkosten
-      hasAnyDiscount ? 
-        `${totalDiscountPercentage}% korting (€${totalSavedAmount.toFixed(2)})`.replace('.', ',') : 
-        "incl. 21% BTW",  // Korting of BTW info
+      formatPrice(shipping),  // Verzendkosten
+      "incl. 21% BTW",  // BTW info
       "✅",  // Order verwerkt
       emailSent ? "✅" : "❌",  // Email status
-      session.payment_status  // Betaalstatus
+      session.payment_status === 'paid' ? "✅" : ""  // Betaalstatus
     ]
 
     console.log("👉 Row contents:", row)
