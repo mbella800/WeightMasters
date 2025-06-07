@@ -140,37 +140,31 @@ module.exports = async function handler(req, res) {
           tax: "0.00",  // BTW is al inbegrepen
           total: total.toFixed(2),
           shopName: "Weightmasters",
-          items: lineItems.data
-            .filter(item => !item.description?.includes("Verzendkosten") && !item.description?.includes("Gratis verzending"))
-            .map(item => {
-              const productName = item.description?.replace(/🎉.*$/, "").trim() || ""
-              const productImage = item.price?.product?.images?.[0] || ""
-              const metadata = item.price?.product?.metadata || {}
-              const currentPrice = item.price.unit_amount / 100
-              const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice
-              const hasDiscount = originalPrice > currentPrice
-              const discountPercentage = hasDiscount ? 
-                Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : 0
-              
-              return {
-                productName,
-                productImage,
-                productPrice: currentPrice.toFixed(2),
-                quantity: item.quantity,
-                originalPrice: hasDiscount ? originalPrice.toFixed(2) : null,
-                discountPercentage: hasDiscount ? discountPercentage : null
-              }
-            }),
+          items: items.map(item => ({
+            productName: `${item.productName} (incl. BTW)`,
+            productImage: item.productImage,
+            productPrice: item.productPrice,
+            quantity: item.quantity,
+            originalPrice: item.hasDiscount ? item.originalPrice : null,
+            discountPercentage: item.hasDiscount ? item.discountPercentage : null,
+            totalPrice: item.totalPrice,
+            totalOriginalPrice: item.hasDiscount ? item.totalOriginalPrice : null
+          })),
           hasDiscount: itemsWithDiscount.length > 0,
           discountItems: itemsWithDiscount.map(item => ({
-            productName: item.productName,
+            productName: `${item.productName} (incl. BTW)`,
             originalPrice: item.originalPrice,
             newPrice: item.productPrice,
             savedAmount: item.itemSavings,
-            discountPercentage: item.discountPercentage
+            discountPercentage: item.discountPercentage,
+            quantity: item.quantity,
+            totalSaved: (parseFloat(item.itemSavings) * item.quantity).toFixed(2)
           })),
           totalSaved: itemsWithDiscount.reduce((sum, item) => 
-            sum + (parseFloat(item.itemSavings) * item.quantity), 0).toFixed(2)
+            sum + (parseFloat(item.itemSavings) * item.quantity), 0).toFixed(2),
+          shippingInfo: shipping > 0 ? 
+            `Verzendkosten (incl. BTW): €${shipping.toFixed(2)}` : 
+            "🎉 Gratis verzending"
         }
       }
 

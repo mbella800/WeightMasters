@@ -44,22 +44,55 @@
       padding: 0;
     }
     .product {
-      margin-bottom: 12px;
-      padding: 12px;
-      border: 1px solid #eee;
-      border-radius: 8px;
-      background: #fafafa;
-    }
-    .product img {
-      max-width: 80px;
-      border-radius: 6px;
       margin-bottom: 8px;
+      padding: 8px;
+      border: 1px solid #eee;
+      border-radius: 6px;
+      background: #fafafa;
+      display: flex;
+      align-items: center;
+      min-height: 50px;
+    }
+    .product-image {
+      width: 50px;
+      margin-right: 12px;
+      flex-shrink: 0;
+    }
+    .product-image img {
+      width: 100%;
+      height: 50px;
+      object-fit: cover;
+      border-radius: 4px;
+    }
+    .product-details {
+      flex-grow: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .product-info {
+      flex-grow: 1;
+    }
+    .product-price {
+      text-align: right;
+      white-space: nowrap;
+      min-width: 100px;
     }
     .product h3 {
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 600;
-      margin: 0 0 6px 0;
+      margin: 0;
       color: #1a1a1a;
+    }
+    .quantity {
+      color: #666;
+      font-size: 13px;
+    }
+    .btw-notice {
+      color: #666;
+      font-size: 11px;
+      margin-top: 2px;
     }
     .discount-section {
       background: #f7f7f7;
@@ -105,6 +138,18 @@
       color: #2ecc71;
       font-weight: 600;
     }
+    .shipping-notice {
+      background: #e8f5e9;
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin: 8px 0;
+      color: #2e7d32;
+      font-weight: 500;
+    }
+    .shipping-notice.paid {
+      background: #fafafa;
+      color: #666;
+    }
     .footer {
       text-align: center;
       padding: 12px;
@@ -124,11 +169,6 @@
       border-radius: 4px;
       font-size: 12px;
     }
-    .btw-note {
-      font-size: 12px;
-      color: #666;
-      margin-top: 4px;
-    }
   </style>
 </head>
 <body>
@@ -142,34 +182,46 @@
       <h2 class="section-title">Bestelde producten</h2>
       {% for item in params.items %}
       <div class="product">
-        {% if item.productImage %}
-        <img src="{{ item.productImage }}" alt="{{ item.productName }}">
-        {% endif %}
-        <h3>{{ item.productName }}</h3>
-        <p>
-          <span class="price">€{{ item.productPrice }}</span> {{ item.quantity }}x<br>
-          {% if item.discountPercentage %}
-          <span class="discount-price">Originele prijs: €{{ item.originalPrice }} -{{ item.discountPercentage }}%</span>
+        <div class="product-image">
+          {% if item.productImage %}
+          <img src="{{ item.productImage }}" alt="{{ item.productName }}">
           {% endif %}
-          <span class="btw-note">Alle prijzen zijn inclusief BTW</span>
-        </p>
+        </div>
+        <div class="product-details">
+          <div class="product-info">
+            <h3>{{ item.productName }}</h3>
+            <span class="quantity">{{ item.quantity }}x</span>
+          </div>
+          <div class="product-price">
+            <div class="price">€{{ item.totalPrice }}</div>
+            {% if item.discountPercentage %}
+            <div class="discount-price" style="font-size: 11px;">-{{ item.discountPercentage }}%</div>
+            <div class="savings" style="font-size: 11px;">€{{ item.totalSaved }}</div>
+            {% endif %}
+            <div class="btw-notice">Incl. BTW</div>
+          </div>
+        </div>
       </div>
       {% endfor %}
 
+      <div class="shipping-notice {% if params.shipping == '0.00' %}free{% else %}paid{% endif %}">
+        {{ params.shippingInfo }}
+      </div>
+
       {% if params.hasDiscount %}
       <div class="discount-section">
-        <h2 class="section-title">Toegepaste kortingen</h2>
+        <h2 class="section-title">Jouw besparingen</h2>
         {% for item in params.discountItems %}
         <div>
           <h3>{{ item.productName }}</h3>
           <p>
-            Van <span class="price">€{{ item.originalPrice }}</span> voor <span class="discount-price">€{{ item.newPrice }}</span><br>
-            <span class="savings">{{ item.discountPercentage }}% korting</span><br>
-            Je bespaart: <span class="savings">€{{ item.savedAmount }}</span>
+            Van <span class="price">€{{ item.originalPrice }}</span> voor <span class="discount-price">€{{ item.newPrice }}</span> per stuk<br>
+            <span class="savings">{{ item.discountPercentage }}% korting × {{ item.quantity }} stuks</span><br>
+            Totale besparing op dit product: <span class="savings">€{{ item.totalSaved }}</span>
           </p>
         </div>
         {% endfor %}
-        <p><strong>Totale besparing: <span class="savings">€{{ params.totalSaved }}</span></strong></p>
+        <p><strong>Totale besparing op je bestelling: <span class="savings">€{{ params.totalSaved }}</span></strong></p>
       </div>
       {% endif %}
 

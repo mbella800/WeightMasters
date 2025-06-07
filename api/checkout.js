@@ -87,14 +87,14 @@ module.exports = async (req, res) => {
         quantity: quantity
       })
 
-      // ✅ PRODUCT LINE ITEMS ZONDER BTW (BTW wordt apart toegevoegd)
+      // ✅ PRODUCT LINE ITEMS (met BTW notitie en duidelijke namen)
       line_items.push({
         price_data: {
           currency: "eur",
           product_data: {
             name: hasDiscount 
-              ? `${item["Product Name"] || item.title || "Product"} 🎉 -${discountPercentage}%`
-              : item["Product Name"] || item.title || "Product",
+              ? `${item["Product Name"] || item.title || "Product"} (incl. BTW) 🎉 -${discountPercentage}%`
+              : `${item["Product Name"] || item.title || "Product"} (incl. BTW)`,
             images: [item["Product Image"] || item["ProductImage"]].filter(Boolean),
             metadata: {
               weight: itemWeight.toString(),
@@ -120,7 +120,7 @@ module.exports = async (req, res) => {
 
     // Calculate shipping costs exactly like in CartShippingEstimate
     let shippingFee = 0
-    const subtotalBeforeTax = subtotal / 1.21 / 100 // Convert back to pre-tax amount for threshold check
+    const subtotalBeforeTax = subtotal / 100 // No need to divide by 1.21, prices already include BTW
 
     if (subtotalBeforeTax < freeShippingThreshold) {
       if (totalWeight <= 20) shippingFee = 100 // €1,00
@@ -135,7 +135,12 @@ module.exports = async (req, res) => {
       line_items.push({
         price_data: {
           currency: "eur",
-          product_data: { name: "Verzendkosten" },
+          product_data: { 
+            name: "Verzendkosten (incl. BTW)",
+            metadata: {
+              isShipping: "true"
+            }
+          },
           unit_amount: shippingFee,
         },
         quantity: 1,
@@ -144,7 +149,12 @@ module.exports = async (req, res) => {
       line_items.push({
         price_data: {
           currency: "eur",
-          product_data: { name: "Gratis verzending" },
+          product_data: { 
+            name: "🎉 Gratis verzending",
+            metadata: {
+              isShipping: "true"
+            }
+          },
           unit_amount: 0,
         },
         quantity: 1,
