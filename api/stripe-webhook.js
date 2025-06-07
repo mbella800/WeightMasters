@@ -237,6 +237,10 @@ export default async function handler(req, res) {
     const emailPayload = {
       sender: {
         name: paramsForEmail.shopName,
+        email: "noreply@brevo.com",
+      },
+      replyTo: {
+        name: paramsForEmail.shopName,
         email: "mailweightmasters@gmail.com",
       },
       to: [{ email: paramsForEmail.email, name: paramsForEmail.name }],
