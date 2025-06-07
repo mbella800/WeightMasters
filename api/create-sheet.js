@@ -22,7 +22,10 @@ export default async function handler(req, res) {
       client_email: serviceKey.client_email,
       private_key: serviceKey.private_key.replace(/\\n/g, "\n"),
     },
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+    scopes: [
+      "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/drive",
+    ],
   })
 
   const sheets = google.sheets({ version: "v4", auth })
@@ -78,12 +81,44 @@ export default async function handler(req, res) {
 
   const sheetId = spreadsheet.data.spreadsheetId
 
-  // In serverless omgevingen zoals Vercel kunnen we niet naar disk schrijven.
-  // Geef simpelweg het sheetId terug zodat het als ENV-var kan worden ingesteld.
+  // ✅ Deel de sheet automatisch zodat iedereen met de link deze kan bekijken
+  try {
+    const drive = google.drive({ version: "v3", auth })
+    await drive.permissions.create({
+      fileId: sheetId,
+      requestBody: {
+        role: "reader", // alleen-lezen
+        type: "anyone", // iedereen met de link
+        allowFileDiscovery: false, // verborgen in zoekresultaten
+      },
+    })
+
+    // ✅ Geef opgegeven editor-email schrijfrechten
+    const editorEmail = process.env.SHEET_EDITOR_EMAIL || "mailweightmasters@gmail.com"
+    if (editorEmail) {
+      await drive.permissions.create({
+        fileId: sheetId,
+        requestBody: {
+          role: "writer",
+          type: "user",
+          emailAddress: editorEmail,
+        },
+        sendNotificationEmail: false, // geen email spam
+      })
+      console.log(`✍️  Schrijfrechten gegeven aan ${editorEmail}`)
+    }
+
+    console.log("🔓 Sheet permissies ingesteld op 'iedereen met link (viewer)'")
+  } catch (permErr) {
+    console.error("⚠️ Kon permissies niet instellen:", permErr.message)
+  }
+
+  const sheetLink = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`
 
   console.log(`✅ Nieuwe sheet aangemaakt voor ${checkoutSlug}: ${sheetId}`)
   res.status(200).json({
-    message: "Nieuwe sheet aangemaakt. Zet deze ID in de Vercel ENV als DEFAULT_SHEET_ID of voeg hem lokaal toe aan sheet-config.json.",
+    message: "Nieuwe sheet aangemaakt en gedeeld als 'everyone with link - viewer'. Zet deze ID in de Vercel ENV als DEFAULT_SHEET_ID of voeg hem toe aan sheet-config.json.",
     sheetId,
+    sheetLink,
   })
 }
