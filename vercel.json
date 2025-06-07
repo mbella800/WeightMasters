@@ -1,3 +1,22 @@
 {
-  "version": 2
+  "version": 2,
+  "env": {
+    "STRIPE_SECRET_KEY": "@stripe_secret_key",
+    "STRIPE_WEBHOOK_SECRET": "@stripe_webhook_secret",
+    "STRIPE_WEBHOOK_SECRET_SHEET": "@stripe_webhook_secret_sheet",
+    "BREVO_API_KEY": "@brevo_api_key",
+    "BREVO_TEMPLATE_ID": "@brevo_template_id",
+    "GOOGLE_SERVICE_KEY": "@google_service_key",
+    "DEFAULT_SHEET_ID": "@default_sheet_id"
+  },
+  "functions": {
+    "api/webhook.js": {
+      "memory": 1024,
+      "maxDuration": 10
+    },
+    "api/stripe-webhook.js": {
+      "memory": 1024,
+      "maxDuration": 10
+    }
+  }
 }
