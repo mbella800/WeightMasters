@@ -2,8 +2,11 @@ const Stripe = require("stripe")
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 const { google } = require('googleapis')
 
-// Gebruik de juiste webhook secret voor de sheet
+// Webhook secret voor sheet updates
 const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET_SHEET
+if (!WEBHOOK_SECRET) {
+  console.error("❌ Missing STRIPE_WEBHOOK_SECRET_SHEET environment variable")
+}
 
 exports.config = {
   api: {
@@ -272,18 +275,20 @@ module.exports = async function handler(req, res) {
     const rawBody = await getRawBody(req)
     const sig = req.headers['stripe-signature']
 
+    console.log("🔑 Using sheet webhook secret:", WEBHOOK_SECRET ? "Found" : "Missing")
+    
     event = stripe.webhooks.constructEvent(
       rawBody,
       sig,
-      WEBHOOK_SECRET // Gebruik de juiste secret
+      WEBHOOK_SECRET
     )
 
-    console.log("✅ Webhook signature verified")
+    console.log("✅ Sheet webhook signature verified")
     const result = await sheetWebhook(event)
     return res.json(result)
 
   } catch (err) {
-    console.error("❌ Webhook error:", err.message)
+    console.error("❌ Sheet webhook error:", err.message)
     return res.status(400).send(`Webhook Error: ${err.message}`)
   }
 } 
