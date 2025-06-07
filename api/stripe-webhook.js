@@ -55,22 +55,13 @@ export default async function handler(req, res) {
     console.log("📨 Raw body length:", body.length)
     console.log("📨 Signature:", sig)
 
-    // ✅ TIJDELIJK: SKIP SIGNATURE VERIFICATIE VOOR VERCEL COMPATIBILITEIT
-    console.log("⚠️ TEMPORARY: Skipping signature verification due to Vercel compatibility issues")
-    console.log("⚠️ WARNING: This should be fixed for production security!")
-    
-    try {
-      const rawBodyString = body.toString('utf8')
-      event = JSON.parse(rawBodyString)
-      console.log("✅ Event parsed successfully without signature verification")
-    } catch (parseErr) {
-      console.error("❌ Could not parse event data:", parseErr.message)
-      return res.status(400).send("Invalid event data")
-    }
-
-    // // ✅ ORIGINELE SIGNATURE VERIFICATIE (UITGESCHAKELD VOOR VERCEL)
-    // event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_WEBHOOK_SECRET)
-    // console.log("✅ Webhook signature verified successfully")
+    // ✅ SIGNATURE VERIFICATIE MET JUISTE SECRET
+    event = stripe.webhooks.constructEvent(
+      body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET_SHEET // Deze secret is voor de email webhook
+    )
+    console.log("✅ Email webhook signature verified successfully")
     
   } catch (err) {
     console.error("❌ Error processing webhook:", err.message)
