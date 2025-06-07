@@ -27,8 +27,7 @@ module.exports = async function sheetWebhook(session, customerName, customerEmai
         month: 'numeric',
         year: 'numeric',
         hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
+        minute: '2-digit'
       }).format(date)
     }
 
@@ -36,39 +35,65 @@ module.exports = async function sheetWebhook(session, customerName, customerEmai
       return `€${amount.toFixed(2)}`.replace('.', ',')
     }
 
-    const row = [
-      formatDate(new Date()),  // Datum
-      metadata.orderId || session.id,  // Order ID
-      customerName,
-      customerEmail,
-      customerPhone,
-      country,
-      city,
-      postalCode,
-      address,
-      formatPrice(total),  // Totaalbedrag
-      hasAnyDiscount ? formatPrice(totalOriginalValue) : formatPrice(subtotal),  // Originele prijs
-      formatPrice(shipping),  // Verzendkosten
-      "incl. 21% BTW",  // BTW info
-      "✅",  // Order verwerkt
-      emailSent ? "✅" : "❌",  // Email status
-      session.payment_status === 'paid' ? "✅" : ""  // Betaalstatus
-    ]
+    const formatPercentage = (percentage) => {
+      return percentage ? `${percentage}%` : ""
+    }
 
-    console.log("👉 Row contents:", row)
+    // Get line items for product details
+    const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { expand: ['data.price.product'] })
+    const items = lineItems.data.filter(item => !item.description.includes("Verzendkosten"))
+    
+    // Process all items and create rows for each
+    const rows = items.map(item => {
+      const productName = item.description?.replace(/🎉.*$/, "").trim() || ""
+      const quantity = item.quantity || 1
+      const currentPrice = (item.price.unit_amount || 0) / 100
+      const metadata = item.price?.product?.metadata || {}
+      const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice
+      const hasDiscount = originalPrice > currentPrice
+      const discountPercentage = hasDiscount ? 
+        Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : 0
+      const savings = hasDiscount ? (originalPrice - currentPrice) : 0
+      
+      return [
+        formatDate(new Date()),                    // Datum
+        session.id.slice(0, 8),                    // Order ID (verkort)
+        capitalizeWords(customerName),             // Naam
+        customerEmail,                             // Email
+        customerPhone,                             // Telefoon
+        country,                                   // Land
+        city,                                      // Stad
+        postalCode,                                // Postcode
+        address,                                   // Adres
+        productName,                               // Product
+        quantity,                                  // Aantal
+        formatPrice(originalPrice),                // Originele prijs
+        hasDiscount ? formatPrice(currentPrice) : "",  // Prijs na korting
+        hasDiscount ? `${discountPercentage}%` : "",  // Korting %
+        hasDiscount ? formatPrice(savings) : "",   // Besparing per item
+        formatPrice(shipping),                     // Verzendkosten
+        "incl. 21% BTW",                          // BTW info
+        formatPrice(total),                        // Totaal
+        session.payment_status === 'paid' ? "✅" : "",  // Betaalstatus
+        emailSent ? "✅" : "❌"                    // Email status
+      ]
+    })
+
+    console.log("👉 Row contents:", rows)
 
     const sheets = await getGoogleSheetClient()
-    
+
+    // Update the sheet with multiple rows
     await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SHEETS_ID,
-      range: 'Bestellingen!A:P',
+      range: 'Bestellingen!A:T',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: [row],
+        values: rows,
       },
     })
 
-    console.log("✅ Bestelling gelogd in Google Sheet")
+    console.log("✅ Bestellingen gelogd in Google Sheet")
     return true
   } catch (error) {
     console.error("❌ Error logging to sheet:", error)
