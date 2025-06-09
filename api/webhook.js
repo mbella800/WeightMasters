@@ -92,114 +92,94 @@ async function initializeSheet(sheets) {
     'Totaalbedrag',
     'Subtotaal',
     'Verzendkosten',
-    'BTW/Korting info',
+    'BTW',
+    'Korting %',
     'Order verwerkt',
     'Email verstuurd',
     'Betaalstatus',
     'Track & Trace',
     'Verzendmethode',
-    'Product naam',
-    'Aantal',
-    'Prijs per stuk',
-    'Totaal prijs',
-    'Besparing per stuk',
+    'Producten',
     'Totale besparing'
   ]
 
   try {
-    // Clear the existing content
-    await sheets.spreadsheets.values.clear({
+    // Check if headers already exist
+    const response = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.DEFAULT_SHEET_ID,
-      range: 'Bestellingen!A:X',
-    })
+      range: 'Bestellingen!A1:U1',
+    });
 
-    // Set the headers
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: process.env.DEFAULT_SHEET_ID,
-      range: 'Bestellingen!A1',
-      valueInputOption: 'USER_ENTERED',
-      requestBody: {
-        values: [headers]
-      }
-    })
+    if (!response.data.values || response.data.values[0].join(',') !== headers.join(',')) {
+      // Only set headers if they don't exist or are different
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: process.env.DEFAULT_SHEET_ID,
+        range: 'Bestellingen!A1',
+        valueInputOption: 'USER_ENTERED',
+        requestBody: {
+          values: [headers]
+        }
+      });
 
-    // Format headers (make bold and freeze)
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: process.env.DEFAULT_SHEET_ID,
-      requestBody: {
-        requests: [
-          {
-            repeatCell: {
-              range: {
-                sheetId: 0,
-                startRowIndex: 0,
-                endRowIndex: 1,
-                startColumnIndex: 0,
-                endColumnIndex: headers.length
-              },
-              cell: {
-                userEnteredFormat: {
-                  textFormat: {
-                    bold: true
-                  },
-                  backgroundColor: {
-                    red: 0.9,
-                    green: 0.9,
-                    blue: 0.9
+      // Format headers
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: process.env.DEFAULT_SHEET_ID,
+        requestBody: {
+          requests: [
+            {
+              repeatCell: {
+                range: {
+                  sheetId: 0,
+                  startRowIndex: 0,
+                  endRowIndex: 1,
+                  startColumnIndex: 0,
+                  endColumnIndex: headers.length
+                },
+                cell: {
+                  userEnteredFormat: {
+                    textFormat: { bold: true },
+                    backgroundColor: {
+                      red: 0.9,
+                      green: 0.9,
+                      blue: 0.9
+                    }
                   }
-                }
-              },
-              fields: 'userEnteredFormat(textFormat,backgroundColor)'
+                },
+                fields: 'userEnteredFormat(textFormat,backgroundColor)'
+              }
+            },
+            {
+              updateSheetProperties: {
+                properties: {
+                  sheetId: 0,
+                  gridProperties: {
+                    frozenRowCount: 1
+                  }
+                },
+                fields: 'gridProperties.frozenRowCount'
+              }
             }
-          },
-          {
-            updateSheetProperties: {
-              properties: {
-                sheetId: 0,
-                gridProperties: {
-                  frozenRowCount: 1
-                }
-              },
-              fields: 'gridProperties.frozenRowCount'
-            }
-          }
-        ]
-      }
-    })
+          ]
+        }
+      });
+    }
   } catch (error) {
-    console.error('Error initializing sheet:', error)
+    console.error('Error initializing sheet:', error);
   }
 }
 
 async function sheetWebhook(event) {
   try {
-    if (event.type !== "checkout.session.completed") {
-      return { success: true, message: "Non-checkout event skipped" }
-    }
+    const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
+      expand: ['line_items.data.price.product', 'customer']
+    })
 
-    const session = event.data.object
-    if (!session || !session.id) {
-      throw new Error("Invalid session data received")
-    }
+    const { shipping, subtotal, total } = calculateOrderTotals(session)
+    const products = session.line_items.data
 
-    const lineItems = await stripe.checkout.sessions.listLineItems(
-      session.id,
-      { expand: ['data.price.product'] }
-    )
-
-    if (!lineItems || !lineItems.data) {
-      throw new Error("No line items found in session")
-    }
-
-    const products = lineItems.data.filter(item => 
-      !item.description?.toLowerCase().includes('verzend')
-    )
-
-    const subtotal = session.amount_subtotal / 100
-    const shipping = session.total_details?.amount_shipping / 100 || 0
-    const total = session.amount_total / 100
-
-    const rows = products.map(item => {
+    // Calculate total savings and format product list
+    let totalSavings = 0
+    const formattedProducts = products.map(item => {
       const productName = item.description?.replace(/🎉.*$/, "").trim() || ""
       const quantity = item.quantity || 1
       const currentPrice = (item.price.unit_amount || 0) / 100
@@ -207,58 +187,67 @@ async function sheetWebhook(event) {
       
       const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice
       const hasDiscount = originalPrice > currentPrice
-      const discountPercentage = hasDiscount ? 
-        Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : 0
       const savingsPerItem = hasDiscount ? (originalPrice - currentPrice) : 0
-      const totalSavings = savingsPerItem * quantity
-      
-      const totalOriginalPrice = originalPrice * quantity
-      const totalCurrentPrice = currentPrice * quantity
+      const itemTotalSavings = savingsPerItem * quantity
 
-      return [
-        formatDate(new Date()),
-        session.payment_intent || session.id,
-        capitalizeWords(session.customer_details?.name || ""),
-        session.customer_details?.email || "",
-        session.customer_details?.phone || "",
-        session.customer_details?.address?.country || "",
-        session.customer_details?.address?.city || "",
-        session.customer_details?.address?.postal_code || "",
-        `${session.customer_details?.address?.line1 || ""} ${session.customer_details?.address?.line2 || ""}`.trim(),
-        formatPrice(total),
-        formatPrice(subtotal),
-        formatPrice(shipping),
-        hasDiscount ? `${discountPercentage}%` : "incl. 21% BTW",
-        "✅",
-        "✅",
-        session.payment_status,
-        "",
-        "postnl",
-        productName,
-        quantity,
-        formatPrice(currentPrice),
-        formatPrice(totalCurrentPrice),
-        hasDiscount ? formatPrice(savingsPerItem) : "",
-        hasDiscount ? formatPrice(totalSavings) : ""
-      ]
-    })
+      totalSavings += itemTotalSavings
+
+      return `${productName} (${quantity}x ${formatPrice(currentPrice)})`
+    }).join(', ')
+
+    // Calculate highest discount percentage
+    const maxDiscount = products.reduce((max, item) => {
+      const currentPrice = (item.price.unit_amount || 0) / 100
+      const metadata = item.price?.product?.metadata || {}
+      const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice
+      const discountPercentage = originalPrice > currentPrice ? 
+        Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : 0
+      return Math.max(max, discountPercentage)
+    }, 0)
+
+    const row = [
+      formatDate(new Date()),                    // Datum
+      session.payment_intent || session.id,       // Order ID
+      capitalizeWords(session.customer_details?.name || ""), // Naam
+      session.customer_details?.email || "",      // Email
+      session.customer_details?.phone || "",      // Telefoon
+      session.customer_details?.address?.country || "", // Land
+      session.customer_details?.address?.city || "", // Stad
+      session.customer_details?.address?.postal_code || "", // Postcode
+      `${session.customer_details?.address?.line1 || ""} ${session.customer_details?.address?.line2 || ""}`.trim(), // Adres
+      formatPrice(total),                         // Totaalbedrag
+      formatPrice(subtotal),                      // Subtotaal
+      formatPrice(shipping),                      // Verzendkosten
+      "21%",                                      // BTW
+      maxDiscount > 0 ? `${maxDiscount}%` : "",  // Korting %
+      "✅",                                       // Order verwerkt
+      "✅",                                       // Email verstuurd
+      session.payment_status,                     // Betaalstatus
+      "",                                         // Track & Trace
+      "postnl",                                  // Verzendmethode
+      formattedProducts,                         // Producten
+      totalSavings > 0 ? formatPrice(totalSavings) : "" // Totale besparing
+    ]
 
     const sheets = await getGoogleSheetClient()
+    
+    // Initialize sheet if needed (only sets headers if they don't exist)
+    await initializeSheet(sheets)
+
+    // Append the order
     await sheets.spreadsheets.values.append({
-      spreadsheetId: process.env.DEFAULT_SHEET_ID || "1GO9yTvqVebtBMhn3o1sKY-Hcz_d067Zj8P4RQj--bwo",
-      range: 'Bestellingen!A:X',
+      spreadsheetId: process.env.DEFAULT_SHEET_ID,
+      range: 'Bestellingen!A:U',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: rows,
-      },
+        values: [row]
+      }
     })
 
-    console.log("✅ Order succesvol gelogd in Google Sheet")
-    return { success: true, message: "Order logged to sheet" }
-
+    return true
   } catch (error) {
-    console.error("❌ Error processing webhook:", error)
-    throw error
+    console.error('Error in sheetWebhook:', error)
+    return false
   }
 }
 
