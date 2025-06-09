@@ -78,6 +78,99 @@ function capitalizeWords(str) {
   ).join(' ') || ""
 }
 
+async function initializeSheet(sheets) {
+  const headers = [
+    'Datum',
+    'Order ID',
+    'Naam',
+    'Email',
+    'Telefoon',
+    'Land',
+    'Stad',
+    'Postcode',
+    'Adres',
+    'Totaalbedrag',
+    'Subtotaal',
+    'Verzendkosten',
+    'BTW/Korting info',
+    'Order verwerkt',
+    'Email verstuurd',
+    'Betaalstatus',
+    'Track & Trace',
+    'Verzendmethode',
+    'Product naam',
+    'Aantal',
+    'Prijs per stuk',
+    'Totaal prijs',
+    'Besparing per stuk',
+    'Totale besparing'
+  ]
+
+  try {
+    // Clear the existing content
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: process.env.DEFAULT_SHEET_ID,
+      range: 'Bestellingen!A:X',
+    })
+
+    // Set the headers
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: process.env.DEFAULT_SHEET_ID,
+      range: 'Bestellingen!A1',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: [headers]
+      }
+    })
+
+    // Format headers (make bold and freeze)
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: process.env.DEFAULT_SHEET_ID,
+      requestBody: {
+        requests: [
+          {
+            repeatCell: {
+              range: {
+                sheetId: 0,
+                startRowIndex: 0,
+                endRowIndex: 1,
+                startColumnIndex: 0,
+                endColumnIndex: headers.length
+              },
+              cell: {
+                userEnteredFormat: {
+                  textFormat: {
+                    bold: true
+                  },
+                  backgroundColor: {
+                    red: 0.9,
+                    green: 0.9,
+                    blue: 0.9
+                  }
+                }
+              },
+              fields: 'userEnteredFormat(textFormat,backgroundColor)'
+            }
+          },
+          {
+            updateSheetProperties: {
+              properties: {
+                sheetId: 0,
+                gridProperties: {
+                  frozenRowCount: 1
+                }
+              },
+              fields: 'gridProperties.frozenRowCount'
+            }
+          }
+        ]
+      }
+    })
+  } catch (error) {
+    console.error('Error initializing sheet:', error)
+  }
+}
+
 async function sheetWebhook(event) {
   try {
     if (event.type !== "checkout.session.completed") {
@@ -169,13 +262,20 @@ async function sheetWebhook(event) {
   }
 }
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).send("Method Not Allowed")
+    res.setHeader('Allow', 'POST')
+    res.status(405).end('Method Not Allowed')
+    return
   }
 
   let event
   try {
+    const sheets = await getGoogleSheetClient()
+    
+    // Initialize the sheet with headers
+    await initializeSheet(sheets)
+
     const rawBody = await getRawBody(req)
     const sig = req.headers['stripe-signature']
     const secret = process.env.STRIPE_WEBHOOK_SECRET_SHEET
