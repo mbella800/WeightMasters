@@ -108,6 +108,8 @@ async function initializeSheet(sheets) {
     'Track & Trace',
     'Verzendmethode',
     'Producten',
+    'Totaal prijs',
+    'Besparing per stuk',
     'Totale besparing'
   ]
 
@@ -123,7 +125,7 @@ async function initializeSheet(sheets) {
     // Check if headers already exist
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.DEFAULT_SHEET_ID,
-      range: 'Bestellingen!A1:U1',
+      range: 'Bestellingen!A1:W1',
     });
 
     if (!response.data.values || response.data.values[0].join(',') !== headers.join(',')) {
@@ -189,7 +191,7 @@ async function resetSheet(sheets) {
     // Clear all content except headers
     await sheets.spreadsheets.values.clear({
       spreadsheetId: process.env.DEFAULT_SHEET_ID,
-      range: 'Bestellingen!A2:U',
+      range: 'Bestellingen!A2:W',
     });
     console.log('Sheet reset successful');
   } catch (error) {
@@ -205,9 +207,6 @@ async function sheetWebhook(event) {
 
     const sheets = await getGoogleSheetClient();
     
-    // Reset sheet if needed (uncomment next line to reset)
-    await resetSheet(sheets);
-    
     // Initialize sheet if needed (only sets headers if they don't exist)
     await initializeSheet(sheets);
 
@@ -216,6 +215,7 @@ async function sheetWebhook(event) {
 
     // Calculate total savings and format product list
     let totalSavings = 0;
+    let maxSavingsPerItem = 0;
     const formattedProducts = products.map(item => {
       const productName = item.description?.replace(/🎉.*$/, "").trim() || "";
       const quantity = item.quantity || 1;
@@ -228,8 +228,11 @@ async function sheetWebhook(event) {
       const itemTotalSavings = savingsPerItem * quantity;
 
       totalSavings += itemTotalSavings;
+      if (savingsPerItem > maxSavingsPerItem) {
+        maxSavingsPerItem = savingsPerItem;
+      }
 
-      return `${productName} (${quantity}x ${formatPrice(currentPrice)}${hasDiscount ? `, besparing: ${formatPrice(savingsPerItem)} p/s` : ''})`;
+      return `${productName} (${quantity}x ${formatPrice(currentPrice)})`;
     }).join(', ');
 
     // Calculate highest discount percentage
@@ -263,13 +266,15 @@ async function sheetWebhook(event) {
       "",                                         // Track & Trace
       "postnl",                                  // Verzendmethode
       formattedProducts,                         // Producten
+      formatPrice(total),                         // Totaal prijs
+      maxSavingsPerItem > 0 ? formatPrice(maxSavingsPerItem) : "", // Besparing per stuk
       totalSavings > 0 ? formatPrice(totalSavings) : "" // Totale besparing
     ];
 
     // Append the order
     await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.DEFAULT_SHEET_ID,
-      range: 'Bestellingen!A:U',
+      range: 'Bestellingen!A:W',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [row]
