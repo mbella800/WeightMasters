@@ -184,42 +184,63 @@ async function initializeSheet(sheets) {
   }
 }
 
+async function resetSheet(sheets) {
+  try {
+    // Clear all content except headers
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: process.env.DEFAULT_SHEET_ID,
+      range: 'Bestellingen!A2:U',
+    });
+    console.log('Sheet reset successful');
+  } catch (error) {
+    console.error('Error resetting sheet:', error);
+  }
+}
+
 async function sheetWebhook(event) {
   try {
     const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
       expand: ['line_items.data.price.product', 'customer']
-    })
+    });
 
-    const { shipping, subtotal, total } = calculateOrderTotals(session)
-    const products = session.line_items.data
+    const sheets = await getGoogleSheetClient();
+    
+    // Reset sheet if needed (uncomment next line to reset)
+    await resetSheet(sheets);
+    
+    // Initialize sheet if needed (only sets headers if they don't exist)
+    await initializeSheet(sheets);
+
+    const { shipping, subtotal, total } = calculateOrderTotals(session);
+    const products = session.line_items.data;
 
     // Calculate total savings and format product list
-    let totalSavings = 0
+    let totalSavings = 0;
     const formattedProducts = products.map(item => {
-      const productName = item.description?.replace(/🎉.*$/, "").trim() || ""
-      const quantity = item.quantity || 1
-      const currentPrice = (item.price.unit_amount || 0) / 100
-      const metadata = item.price?.product?.metadata || {}
+      const productName = item.description?.replace(/🎉.*$/, "").trim() || "";
+      const quantity = item.quantity || 1;
+      const currentPrice = (item.price.unit_amount || 0) / 100;
+      const metadata = item.price?.product?.metadata || {};
       
-      const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice
-      const hasDiscount = originalPrice > currentPrice
-      const savingsPerItem = hasDiscount ? (originalPrice - currentPrice) : 0
-      const itemTotalSavings = savingsPerItem * quantity
+      const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice;
+      const hasDiscount = originalPrice > currentPrice;
+      const savingsPerItem = hasDiscount ? (originalPrice - currentPrice) : 0;
+      const itemTotalSavings = savingsPerItem * quantity;
 
-      totalSavings += itemTotalSavings
+      totalSavings += itemTotalSavings;
 
-      return `${productName} (${quantity}x ${formatPrice(currentPrice)})`
-    }).join(', ')
+      return `${productName} (${quantity}x ${formatPrice(currentPrice)}${hasDiscount ? `, besparing: ${formatPrice(savingsPerItem)} p/s` : ''})`;
+    }).join(', ');
 
     // Calculate highest discount percentage
     const maxDiscount = products.reduce((max, item) => {
-      const currentPrice = (item.price.unit_amount || 0) / 100
-      const metadata = item.price?.product?.metadata || {}
-      const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice
+      const currentPrice = (item.price.unit_amount || 0) / 100;
+      const metadata = item.price?.product?.metadata || {};
+      const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice;
       const discountPercentage = originalPrice > currentPrice ? 
-        Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : 0
-      return Math.max(max, discountPercentage)
-    }, 0)
+        Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : 0;
+      return Math.max(max, discountPercentage);
+    }, 0);
 
     const row = [
       formatDate(new Date()),                    // Datum
@@ -243,12 +264,7 @@ async function sheetWebhook(event) {
       "postnl",                                  // Verzendmethode
       formattedProducts,                         // Producten
       totalSavings > 0 ? formatPrice(totalSavings) : "" // Totale besparing
-    ]
-
-    const sheets = await getGoogleSheetClient()
-    
-    // Initialize sheet if needed (only sets headers if they don't exist)
-    await initializeSheet(sheets)
+    ];
 
     // Append the order
     await sheets.spreadsheets.values.append({
@@ -258,12 +274,12 @@ async function sheetWebhook(event) {
       requestBody: {
         values: [row]
       }
-    })
+    });
 
-    return true
+    return true;
   } catch (error) {
-    console.error('Error in sheetWebhook:', error)
-    return false
+    console.error('Error in sheetWebhook:', error);
+    return false;
   }
 }
 
