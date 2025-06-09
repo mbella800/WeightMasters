@@ -1,6 +1,12 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const { google } = require('googleapis')
 
+// Webhook secret voor sheet notifications
+const WEBHOOK_SECRET_SHEET = process.env.STRIPE_WEBHOOK_SECRET_SHEET
+if (!WEBHOOK_SECRET_SHEET) {
+  console.error("❌ Missing STRIPE_WEBHOOK_SECRET_SHEET environment variable")
+}
+
 exports.config = {
   api: {
     bodyParser: false,
@@ -8,11 +14,39 @@ exports.config = {
 }
 
 async function getGoogleSheetClient() {
-  const auth = new google.auth.GoogleAuth({
-    credentials: JSON.parse(process.env.GOOGLE_SERVICE_KEY),
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-  })
-  return google.sheets({ version: 'v4', auth })
+  try {
+    let credentials;
+    const serviceKey = process.env.GOOGLE_SERVICE_KEY;
+    
+    if (!serviceKey) {
+      throw new Error("Missing GOOGLE_SERVICE_KEY");
+    }
+
+    try {
+      // Parse the service key
+      credentials = JSON.parse(serviceKey);
+      
+      // Convert the private key to a proper format
+      if (credentials.private_key) {
+        credentials.private_key = credentials.private_key
+          .replace(/\\n/g, '\n')
+          .replace(/\\"/, '"');
+      }
+    } catch (e) {
+      console.error("Failed to parse GOOGLE_SERVICE_KEY:", e);
+      throw new Error("Invalid GOOGLE_SERVICE_KEY format");
+    }
+
+    const auth = new google.auth.GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets']
+    });
+
+    return google.sheets({ version: 'v4', auth });
+  } catch (error) {
+    console.error("❌ Google Sheets Auth Error:", error);
+    throw error;
+  }
 }
 
 function getRawBody(req) {
@@ -98,26 +132,27 @@ async function sheetWebhook(event) {
         session.customer_details?.address?.city || "",
         session.customer_details?.address?.postal_code || "",
         `${session.customer_details?.address?.line1 || ""} ${session.customer_details?.address?.line2 || ""}`.trim(),
+        formatPrice(total),
+        formatPrice(subtotal),
+        formatPrice(shipping),
+        hasDiscount ? `${discountPercentage}%` : "incl. 21% BTW",
+        "✅",
+        "✅",
+        session.payment_status,
+        "",
+        "postnl",
         productName,
         quantity,
-        formatPrice(originalPrice),
         formatPrice(currentPrice),
-        hasDiscount ? `${discountPercentage}%` : "",
-        hasDiscount ? formatPrice(savingsPerItem) : "",
-        formatPrice(totalOriginalPrice),
         formatPrice(totalCurrentPrice),
-        hasDiscount ? formatPrice(totalSavings) : "",
-        formatPrice(shipping),
-        "Inclusief",
-        formatPrice(total),
-        session.payment_status === 'paid' ? "✅" : "❌",
-        "✅"
+        hasDiscount ? formatPrice(savingsPerItem) : "",
+        hasDiscount ? formatPrice(totalSavings) : ""
       ]
     })
 
     const sheets = await getGoogleSheetClient()
     await sheets.spreadsheets.values.append({
-      spreadsheetId: process.env.DEFAULT_SHEET_ID,
+      spreadsheetId: process.env.DEFAULT_SHEET_ID || "1GO9yTvqVebtBMhn3o1sKY-Hcz_d067Zj8P4RQj--bwo",
       range: 'Bestellingen!A:X',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
@@ -143,12 +178,13 @@ module.exports = async function handler(req, res) {
   try {
     const rawBody = await getRawBody(req)
     const sig = req.headers['stripe-signature']
+    const secret = process.env.STRIPE_WEBHOOK_SECRET_SHEET
 
     console.log("🔍 Verifying sheet webhook signature...")
     event = stripe.webhooks.constructEvent(
       rawBody,
       sig,
-      process.env.STRIPE_WEBHOOK_SECRET_SHEET
+      secret
     )
     console.log("✅ Sheet webhook signature verified")
 
