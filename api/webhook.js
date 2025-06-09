@@ -78,6 +78,14 @@ function capitalizeWords(str) {
   ).join(' ') || ""
 }
 
+function calculateOrderTotals(session) {
+  return {
+    subtotal: session.amount_subtotal / 100,
+    shipping: session.total_details?.amount_shipping / 100 || 0,
+    total: session.amount_total / 100
+  }
+}
+
 async function initializeSheet(sheets) {
   const headers = [
     'Datum',
@@ -104,6 +112,14 @@ async function initializeSheet(sheets) {
   ]
 
   try {
+    // First get the spreadsheet metadata to get the correct sheet ID
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: process.env.DEFAULT_SHEET_ID
+    });
+    
+    const sheet = spreadsheet.data.sheets[0];
+    const sheetId = sheet.properties.sheetId;
+
     // Check if headers already exist
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.DEFAULT_SHEET_ID,
@@ -129,7 +145,7 @@ async function initializeSheet(sheets) {
             {
               repeatCell: {
                 range: {
-                  sheetId: 0,
+                  sheetId: sheetId,
                   startRowIndex: 0,
                   endRowIndex: 1,
                   startColumnIndex: 0,
@@ -151,7 +167,7 @@ async function initializeSheet(sheets) {
             {
               updateSheetProperties: {
                 properties: {
-                  sheetId: 0,
+                  sheetId: sheetId,
                   gridProperties: {
                     frozenRowCount: 1
                   }
