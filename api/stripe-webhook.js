@@ -114,6 +114,12 @@ module.exports = async function handler(req, res) {
       }
 
       try {
+        console.log('💰 Order details:', {
+          subtotal: (subtotal / 100).toFixed(2),
+          shipping: (shippingAmount / 100).toFixed(2),
+          total: (total / 100).toFixed(2)
+        });
+
         const emailPayload = {
           sender: {
             name: "Weightmasters",
