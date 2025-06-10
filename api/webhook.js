@@ -20,42 +20,69 @@ async function buffer(readable) {
 
 async function sheetWebhook(event) {
   try {
-    const session = event.data.object;
-    const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
+    const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
+      expand: ['line_items.data.price.product']
+    });
+
+    const lineItems = await stripe.checkout.sessions.listLineItems(
+      session.id,
+      { expand: ['data.price.product'] }
+    );
 
     // Get customer details
     const customer_email = session.customer_details?.email || '';
     const customer_name = session.customer_details?.name || '';
-
-    // Format line items
-    const items = lineItems.data.map(item => ({
-      name: item.description,
-      quantity: item.quantity,
-      price: (item.price.unit_amount / 100).toFixed(2)
-    }));
-
-    // Calculate totals
-    const subtotal = session.amount_subtotal / 100;
-    const shipping = session.total_details?.amount_shipping / 100 || 0;
-    const total = session.amount_total / 100;
-
-    // Prepare row data
     const timestamp = new Date().toISOString();
     const orderId = session.payment_intent;
-    const itemsList = items.map(item => 
-      `${item.name} (${item.quantity}x €${item.price})`
-    ).join(', ');
+    const subtotal = session.amount_subtotal / 100;
+    const shippingAmount = session.total_details?.amount_shipping / 100 || 0;
+    const total = session.amount_total / 100;
 
-    const rowData = [
-      timestamp,              // Timestamp
-      orderId,               // Order ID
-      customer_name,         // Name
-      customer_email,        // Email
-      itemsList,            // Products
-      subtotal.toFixed(2),  // Subtotal
-      shipping.toFixed(2),  // Shipping
-      total.toFixed(2),     // Total
-    ];
+    // Format line items according to Framer component structure
+    const items = lineItems.data
+      .filter(item => !item.description?.toLowerCase().includes('verzend'))
+      .map(item => {
+        const metadata = item.price?.product?.metadata || {};
+        const productName = item.description?.replace(/🎉.*$/, "").trim() || "";
+        const productImage = item.price?.product?.images?.[0] || "";
+        const currentPrice = item.price.unit_amount / 100;
+        const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice;
+        const hasDiscount = originalPrice > currentPrice;
+        const salePrice = hasDiscount ? currentPrice : null;
+        const weight = metadata.weight || 0;
+        const freeShippingThreshold = metadata.freeShippingThreshold || 50;
+
+        return {
+          "Timestamp": timestamp,
+          "Order ID": orderId,
+          "Customer Name": customer_name,
+          "Customer Email": customer_email,
+          "Product Name": productName,
+          "Product Image": productImage,
+          "Product Price": currentPrice.toFixed(2),
+          "Sale Price Optioneel": salePrice?.toFixed(2) || "",
+          "Original Price": originalPrice.toFixed(2),
+          "Weight (g)": weight,
+          "FreeShippingTreshold": freeShippingThreshold,
+          "Quantity": item.quantity,
+          "Total Product Price": (currentPrice * item.quantity).toFixed(2),
+          "Has Discount": hasDiscount ? "Yes" : "No",
+          "Discount Amount": hasDiscount ? (originalPrice - currentPrice).toFixed(2) : "",
+          "Discount Percentage": hasDiscount ? Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : "",
+          "Stripe Product ID": item.price.product.id,
+          "Stripe Price ID": item.price.id,
+          "Subtotal": subtotal.toFixed(2),
+          "Shipping Amount": shippingAmount.toFixed(2),
+          "Total Amount": total.toFixed(2),
+          "Payment Status": session.payment_status,
+          "Shipping Status": "",  // To be updated manually
+          "Notes": ""  // For manual notes
+        };
+      });
+
+    // Prepare rows for Google Sheets
+    const headerRow = Object.keys(items[0]);
+    const dataRows = items.map(item => headerRow.map(key => item[key]));
 
     // Google Sheets API setup
     const auth = new google.auth.GoogleAuth({
@@ -65,23 +92,41 @@ async function sheetWebhook(event) {
 
     const sheets = google.sheets({ version: 'v4', auth });
     const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
-    const range = 'Orders!A:H';
 
-    // Append the row
+    // Check if headers exist
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: 'Orders!1:1',
+    });
+
+    const values = response.data.values;
+    if (!values || values.length === 0) {
+      // Add headers if they don't exist
+      await sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: 'Orders!A1',
+        valueInputOption: 'USER_ENTERED',
+        resource: {
+          values: [headerRow],
+        },
+      });
+    }
+
+    // Append the data rows
     await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range,
+      range: 'Orders!A2',
       valueInputOption: 'USER_ENTERED',
       insertDataOption: 'INSERT_ROWS',
       resource: {
-        values: [rowData],
+        values: dataRows,
       },
     });
 
-    console.log('✅ Order added to Google Sheet');
+    console.log('✅ Order data added to Google Sheet');
     return true;
   } catch (error) {
-    console.error('❌ Error updating sheet:', error);
+    console.error('❌ Error updating Google Sheet:', error);
     throw error;
   }
 }
