@@ -1,5 +1,6 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
-const { google } = require('googleapis')
+import { google } from 'googleapis';
+import stripePkg from 'stripe';
+const stripe = stripePkg(process.env.STRIPE_SECRET_KEY);
 
 async function getGoogleSheetClient() {
   try {
@@ -18,7 +19,7 @@ async function getGoogleSheetClient() {
       if (credentials.private_key) {
         credentials.private_key = credentials.private_key
           .replace(/\\n/g, '\n')
-          .replace(/\\"/, '"');
+          .replace(/\"/, '"');
       }
     } catch (e) {
       console.error("Failed to parse GOOGLE_SERVICE_KEY:", e);
@@ -48,20 +49,15 @@ async function initializeSheet(sheets) {
     'Stad',
     'Postcode',
     'Adres',
-    'Totaalbedrag',
+    'Original Amount',
+    'Paid Amount',
+    'Discount',
+    'Discount %',
+    'Producten',
     'Subtotaal',
     'Verzendkosten',
-    'BTW',
-    'Korting %',
-    'Order verwerkt',
-    'Email verstuurd',
-    'Betaalstatus',
-    'Track & Trace',
-    'Verzendmethode',
-    'Producten',
-    'Totaal prijs',
-    'Besparing per stuk',
-    'Totale besparing'
+    'Totaal',
+    'Trackingslink'
   ]
 
   try {
@@ -80,7 +76,7 @@ async function initializeSheet(sheets) {
     console.log("🗑️ Clearing sheet content...");
     await sheets.spreadsheets.values.clear({
       spreadsheetId: process.env.DEFAULT_SHEET_ID,
-      range: 'Bestellingen!A2:W',
+      range: 'Bestellingen!A2:Q',
     });
     console.log("✅ Sheet content cleared");
 
@@ -98,11 +94,11 @@ async function initializeSheet(sheets) {
 
     // Format headers
     console.log("🎨 Formatting headers...");
-    await sheets.spreadsheets.batchUpdate({
+      await sheets.spreadsheets.batchUpdate({
       spreadsheetId: process.env.DEFAULT_SHEET_ID,
-      requestBody: {
-        requests: [
-          {
+        requestBody: {
+          requests: [
+            {
             repeatCell: {
               range: {
                 sheetId: sheetId,
