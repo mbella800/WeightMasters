@@ -40,23 +40,23 @@ async function getGoogleSheetClient() {
 
 async function initializeSheet(sheets) {
   const headers = [
-    'Datum',
     'Order ID',
-    'Naam',
+    'Date',
+    'Customer Name',
     'Email',
-    'Telefoon',
-    'Land',
-    'Stad',
-    'Postcode',
-    'Adres',
+    'Phone',
+    'Country',
+    'City',
+    'Postal Code',
+    'Address',
     'Original Amount',
     'Paid Amount',
     'Discount',
     'Discount %',
-    'Producten',
-    'Subtotaal',
-    'Verzendkosten',
-    'Totaal',
+    'Products',
+    'Subtotal',
+    'Shipping',
+    'Total',
     'Trackingslink'
   ]
 

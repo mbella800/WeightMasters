@@ -47,12 +47,13 @@ async function updateGoogleSheet(session) {
     const shippingFeeStr = (shippingFee / 100).toFixed(2).replace('.', ',');
     console.log('📦 SHIPPING DEBUG SHEET-WEBHOOK (line item):', { shippingFee, shippingFeeStr });
 
-    // Bereken originele bedrag, betaald bedrag, korting en korting percentage
+    // Bereken originele bedrag, betaald bedrag, korting en korting percentage (alleen producten, geen verzendkosten)
     let originalTotal = 0;
     let paidTotal = 0;
     let totalDiscount = 0;
     let discountPercentage = 0;
-    lineItems.data.forEach(item => {
+    const productLineItems = lineItems.data.filter(item => !(item.description && item.description.toLowerCase().includes('verzend')));
+    productLineItems.forEach(item => {
       const quantity = item.quantity || 1;
       const original = item.price?.product?.metadata?.originalPrice ? parseFloat(item.price.product.metadata.originalPrice) : (item.price.unit_amount / 100);
       const paid = item.price.unit_amount / 100;
@@ -71,12 +72,12 @@ async function updateGoogleSheet(session) {
       'Country': customer.address?.country || '',
       'City': customer.address?.city || '',
       'Postal Code': customer.address?.postal_code || '',
-      'Address': `${customer.address?.line1 || ''} ${customer.address?.line2 || ''}`,
+      'Address': `${customer.address?.line1 || ''} ${customer.address?.line2 || ''}`.trim(),
       'Original Amount': originalTotal.toFixed(2).replace('.', ','),
       'Paid Amount': paidTotal.toFixed(2).replace('.', ','),
       'Discount': totalDiscount > 0 ? totalDiscount.toFixed(2).replace('.', ',') : '',
       'Discount %': totalDiscount > 0 ? discountPercentage + '%' : '',
-      'Products': items.map(item => `${item.name} (${item.quantity}x €${item.price})`).join(', '),
+      'Products': productLineItems.map(item => `${item.description} (${item.quantity}x €${(item.price.unit_amount / 100).toFixed(2).replace('.', ',')})`).join(', '),
       'Subtotal': (session.amount_subtotal / 100).toFixed(2).replace('.', ','),
       'Shipping': shippingFeeStr,
       'Total': (session.amount_total / 100).toFixed(2).replace('.', ','),
