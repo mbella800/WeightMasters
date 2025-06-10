@@ -55,20 +55,46 @@ module.exports = async function handler(req, res) {
         throw new Error("No line items found in session");
       }
 
-      const items = session.line_items.data.map(item => {
-        const quantity = item.quantity || 1;
-        const unitPrice = (item.price.unit_amount || 0) / 100;
-        const totalPrice = unitPrice * quantity;
-        
-        return {
-          productName: item.description?.replace(/🎉.*$/, "").trim() || "",
-          quantity: quantity,
-          unitPrice: unitPrice,
-          totalPrice: totalPrice,
-          discountPercentage: item.price?.product?.metadata?.discountPercentage || null,
-          totalSaved: item.price?.product?.metadata?.totalSaved || null
-        };
-      });
+      const lineItems = await stripe.checkout.sessions.listLineItems(
+        session.id,
+        { expand: ['data.price.product'] }
+      )
+
+      const items = lineItems.data
+        .filter(item => !item.description?.toLowerCase().includes('verzend'))
+        .map(item => {
+          const productName = item.description?.replace(/🎉.*$/, "").trim() || ""
+          const productImage = item.price?.product?.images?.[0] || ""
+          const metadata = item.price?.product?.metadata || {}
+          const currentPrice = item.price.unit_amount / 100
+          const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice
+          const hasDiscount = originalPrice > currentPrice
+          const discountPercentage = hasDiscount ? 
+            Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : 0
+
+          return {
+            productName: productName,
+            productImage,
+            productPrice: currentPrice.toFixed(2),
+            originalPrice: originalPrice.toFixed(2),
+            hasDiscount,
+            discountPercentage,
+            itemSavings: hasDiscount ? (originalPrice - currentPrice).toFixed(2) : "0.00",
+            quantity: item.quantity,
+            totalPrice: (currentPrice * item.quantity).toFixed(2),
+            totalOriginalPrice: (originalPrice * item.quantity).toFixed(2)
+          }
+        })
+
+      const itemsWithDiscount = items.filter(item => item.hasDiscount)
+      const subtotal = session.amount_subtotal
+      const total = session.amount_total
+
+      // Calculate shipping costs based on subtotal
+      let shipping = 0
+      if (subtotal < 10000) { // Less than €100
+        shipping = 495 // €4.95 shipping
+      }
 
       const customer_email = session.customer_details?.email || ""
       const customer_name = session.customer_details?.name || ""
@@ -78,27 +104,50 @@ module.exports = async function handler(req, res) {
       }
 
       try {
-        const subtotal = session.amount_subtotal / 100
-        const shipping = session.total_details?.amount_shipping / 100 || 0
-        const total = session.amount_total / 100
-
         const emailPayload = {
           sender: {
-            name: "WeightMasters",
-            email: process.env.BREVO_FROM_EMAIL
+            name: "Weightmasters",
+            email: "mailweightmasters@gmail.com"
           },
           to: [{
             email: customer_email,
-            name: customer_name
+            name: customer_name || "Klant"
           }],
           templateId: parseInt(process.env.BREVO_TEMPLATE_ID),
           params: {
-            customerName: customer_name,
-            orderItems: items,
-            subtotal: subtotal / 100,
-            shipping: shipping / 100,
-            total: total / 100,
-            orderId: session.id
+            name: capitalizeWords(customer_name) || "Klant",
+            email: customer_email,
+            orderId: session.payment_intent,
+            subtotal: (subtotal / 100).toFixed(2),
+            shipping: (shipping / 100).toFixed(2),
+            tax: "0.00",
+            total: (total / 100).toFixed(2),
+            shopName: "Weightmasters",
+            items: items.map(item => ({
+              productName: item.productName.replace(' (incl. BTW)', ''),
+              productImage: item.productImage,
+              productPrice: item.productPrice,
+              quantity: item.quantity,
+              originalPrice: item.hasDiscount ? item.originalPrice : null,
+              discountPercentage: item.hasDiscount ? item.discountPercentage : null,
+              totalPrice: item.totalPrice,
+              totalOriginalPrice: item.hasDiscount ? item.totalOriginalPrice : null
+            })),
+            hasDiscount: itemsWithDiscount.length > 0,
+            discountItems: itemsWithDiscount.map(item => ({
+              productName: item.productName.replace(' (incl. BTW)', ''),
+              originalPrice: item.originalPrice,
+              newPrice: item.productPrice,
+              savedAmount: item.itemSavings,
+              discountPercentage: item.discountPercentage,
+              quantity: item.quantity,
+              totalSaved: (parseFloat(item.itemSavings) * item.quantity).toFixed(2)
+            })),
+            totalSaved: itemsWithDiscount.reduce((sum, item) => 
+              sum + (parseFloat(item.itemSavings) * item.quantity), 0).toFixed(2),
+            shippingInfo: shipping === 0 ? 
+              "🎉 Gratis verzending" : 
+              `Verzendkosten (incl. BTW): €${(shipping / 100).toFixed(2)}`
           }
         }
 
