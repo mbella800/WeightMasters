@@ -3,7 +3,7 @@ const SibApiV3Sdk = require('sib-api-v3-sdk');
 const { sendOrderConfirmationEmail } = require('../utils/email');
 
 // Disable body parsing, we need the raw body for signature verification
-export const config = {
+const config = {
   api: {
     bodyParser: false,
   },
@@ -146,7 +146,17 @@ async function sendOrderConfirmationEmail(session) {
   }
 }
 
-export default async function handler(req, res) {
+async function buffer(readable) {
+  const chunks = [];
+  for await (const chunk of readable) {
+    chunks.push(
+      typeof chunk === 'string' ? Buffer.from(chunk) : chunk
+    );
+  }
+  return Buffer.concat(chunks);
+}
+
+async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).end('Method Not Allowed');
@@ -165,22 +175,11 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Get the raw request body as a buffer
-    const chunks = [];
-    for await (const chunk of req) {
-      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
-      console.log('📦 Debug - Chunk type:', typeof chunk);
-    }
-    const rawBody = Buffer.concat(chunks);
-    console.log('📝 Debug - Raw body length:', rawBody.length);
-    console.log('🔍 Debug - Raw body preview:', rawBody.toString().substring(0, 100));
+    const buf = await buffer(req);
+    console.log('📝 Debug - Raw body length:', buf.length);
+    console.log('🔍 Debug - Raw body preview:', buf.toString().substring(0, 100));
 
-    // Construct and verify the event using the raw buffer
-    const event = stripe.webhooks.constructEvent(
-      rawBody,
-      sig,
-      webhookSecret
-    );
+    const event = stripe.webhooks.constructEvent(buf, sig, webhookSecret);
 
     console.log('✅ Success: Webhook signature verified');
     console.log('Event type:', event.type);
@@ -208,3 +207,6 @@ export default async function handler(req, res) {
     res.status(400).json({ error: `Webhook Error: ${err.message}` });
   }
 }
+
+module.exports = handler;
+module.exports.config = config;
