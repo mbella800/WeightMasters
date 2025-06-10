@@ -1,5 +1,6 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const { google } = require('googleapis')
+const { buffer } = require('micro')
 
 // Webhook secret voor sheet notifications
 const WEBHOOK_SECRET_SHEET = process.env.STRIPE_WEBHOOK_SECRET_SHEET
@@ -214,9 +215,7 @@ const calculateShippingCost = (items) => {
   return 9.95; // €9,95 zwaar pakket (>2000g)
 };
 
-async function sheetWebhook(req) {
-  const event = req.body;
-  
+async function sheetWebhook(event) {
   if (event.type === "checkout.session.completed") {
     try {
       const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
@@ -277,11 +276,9 @@ async function sheetWebhook(req) {
 module.exports = async (req, res) => {
   if (req.method === 'POST') {
     const sig = req.headers['stripe-signature'];
-    const rawBody = req.rawBody; // Next.js provides this
-
-    console.log('🔍 Verifying sheet webhook signature...');
-
+    
     try {
+      const rawBody = await buffer(req);
       const event = stripe.webhooks.constructEvent(
         rawBody,
         sig,
@@ -289,7 +286,7 @@ module.exports = async (req, res) => {
       );
 
       console.log('✅ Sheet webhook signature verified');
-      const result = await sheetWebhook(req);
+      await sheetWebhook(event);
       
       res.status(200).json({ received: true });
     } catch (err) {

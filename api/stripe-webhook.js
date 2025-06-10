@@ -1,5 +1,6 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const SibApiV3Sdk = require('sib-api-v3-sdk');
+const { buffer } = require('micro');
 
 const defaultClient = SibApiV3Sdk.ApiClient.instance;
 const apiKey = defaultClient.authentications['api-key'];
@@ -161,11 +162,9 @@ async function sendOrderConfirmationEmail(session) {
 module.exports = async (req, res) => {
   if (req.method === 'POST') {
     const sig = req.headers['stripe-signature'];
-    const rawBody = req.rawBody; // Next.js provides this
-
-    console.log('🔍 Verifying email webhook signature...');
-
+    
     try {
+      const rawBody = await buffer(req);
       const event = stripe.webhooks.constructEvent(
         rawBody,
         sig,

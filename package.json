@@ -5,6 +5,7 @@
   "dependencies": {
     "stripe": "^14.0.0",
     "googleapis": "^129.0.0",
-    "micro": "^10.0.1"
+    "micro": "^10.0.1",
+    "sib-api-v3-sdk": "^8.5.0"
   }
 }
