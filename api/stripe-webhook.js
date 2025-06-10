@@ -2,6 +2,13 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const SibApiV3Sdk = require('sib-api-v3-sdk');
 const { buffer } = require('micro');
 
+// Disable body parsing, we need the raw body for signature verification
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
 const defaultClient = SibApiV3Sdk.ApiClient.instance;
 const apiKey = defaultClient.authentications['api-key'];
 apiKey.apiKey = process.env.BREVO_API_KEY;
@@ -11,13 +18,6 @@ const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
 const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET
 if (!WEBHOOK_SECRET) {
   console.error("❌ Missing STRIPE_WEBHOOK_SECRET environment variable")
-}
-
-// ✅ VERCEL-SPECIFIEKE CONFIG
-exports.config = {
-  api: {
-    bodyParser: false,
-  },
 }
 
 function capitalizeWords(str) {
@@ -159,44 +159,41 @@ async function sendOrderConfirmationEmail(session) {
   }
 }
 
-module.exports = async (req, res) => {
-  if (req.method === 'POST') {
-    const sig = req.headers['stripe-signature'];
-    
-    try {
-      const rawBody = await buffer(req);
-      const event = stripe.webhooks.constructEvent(
-        rawBody,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET_EMAIL
-      );
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).end('Method Not Allowed');
+  }
 
-      console.log('✅ Email webhook signature verified');
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET_EMAIL;
 
-      if (event.type === 'checkout.session.completed') {
-        const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
-          expand: ['line_items.data.price.product']
-        });
+  try {
+    const buf = await buffer(req);
+    const event = stripe.webhooks.constructEvent(buf, sig, webhookSecret);
 
-        await sendOrderConfirmationEmail(session);
-        res.status(200).json({ received: true });
-      } else {
-        res.status(400).json({
-          error: {
-            message: 'Unhandled event type'
-          }
-        });
-      }
-    } catch (err) {
-      console.error('❌ Webhook error:', err.message);
+    console.log('✅ Email webhook signature verified');
+
+    if (event.type === 'checkout.session.completed') {
+      const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
+        expand: ['line_items.data.price.product']
+      });
+
+      await sendOrderConfirmationEmail(session);
+      res.status(200).json({ received: true });
+    } else {
       res.status(400).json({
         error: {
-          message: err.message
+          message: 'Unhandled event type'
         }
       });
     }
-  } else {
-    res.setHeader('Allow', 'POST');
-    res.status(405).end('Method Not Allowed');
+  } catch (err) {
+    console.error('❌ Webhook error:', err.message);
+    res.status(400).json({
+      error: {
+        message: err.message
+      }
+    });
   }
-};
+}

@@ -8,11 +8,18 @@ if (!WEBHOOK_SECRET_SHEET) {
   console.error("❌ Missing STRIPE_WEBHOOK_SECRET_SHEET environment variable")
 }
 
-exports.config = {
+// Disable body parsing, we need the raw body for signature verification
+export const config = {
   api: {
     bodyParser: false,
   },
 }
+
+// Initialize auth
+const auth = new google.auth.GoogleAuth({
+  credentials: JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS),
+  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+})
 
 async function getGoogleSheetClient() {
   try {
@@ -273,32 +280,29 @@ async function sheetWebhook(event) {
   return { success: true };
 }
 
-module.exports = async (req, res) => {
-  if (req.method === 'POST') {
-    const sig = req.headers['stripe-signature'];
-    
-    try {
-      const rawBody = await buffer(req);
-      const event = stripe.webhooks.constructEvent(
-        rawBody,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET
-      );
-
-      console.log('✅ Sheet webhook signature verified');
-      await sheetWebhook(event);
-      
-      res.status(200).json({ received: true });
-    } catch (err) {
-      console.error('❌ Webhook error:', err.message);
-      res.status(400).json({
-        error: {
-          message: err.message
-        }
-      });
-    }
-  } else {
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
-    res.status(405).end('Method Not Allowed');
+    return res.status(405).end('Method Not Allowed');
   }
-}; 
+
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  try {
+    const buf = await buffer(req);
+    const event = stripe.webhooks.constructEvent(buf, sig, webhookSecret);
+
+    console.log('✅ Sheet webhook signature verified');
+    await sheetWebhook(event);
+    
+    res.status(200).json({ received: true });
+  } catch (err) {
+    console.error('❌ Webhook error:', err.message);
+    res.status(400).json({
+      error: {
+        message: err.message
+      }
+    });
+  }
+} 
