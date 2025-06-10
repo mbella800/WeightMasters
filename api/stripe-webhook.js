@@ -157,6 +157,30 @@ module.exports = async function handler(req, res) {
         }
 
         console.log("✅ Order confirmation email sent successfully")
+
+        // Find shipping line item
+        const shippingLineItem = session.line_items.data.find(item => 
+          item.price.product.metadata.isShipping === "true"
+        );
+        const shippingCost = shippingLineItem ? shippingLineItem.amount_total / 100 : 0;
+
+        // Add row to sheet
+        await appendToSheet([
+          new Date().toISOString(),
+          session.customer_details.email,
+          session.customer_details.name,
+          session.customer_details.address.line1,
+          session.customer_details.address.postal_code,
+          session.customer_details.address.city,
+          session.customer_details.phone || "",
+          subtotalBeforeShipping / 100,
+          shippingCost, // Add shipping cost to sheet
+          totalAmount / 100,
+          session.payment_status,
+          session.id,
+          productDetails
+        ]);
+
         return res.status(200).json({ received: true })
 
       } catch (error) {

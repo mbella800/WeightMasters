@@ -128,7 +128,7 @@ module.exports = async (req, res) => {
       else shippingFee = 995 // €9,95
     }
 
-    // Verzendkosten toevoegen alleen als er daadwerkelijk verzendkosten zijn
+    // Verzendkosten toevoegen
     if (shippingFee > 0) {
       line_items.push({
         price_data: {
@@ -140,6 +140,21 @@ module.exports = async (req, res) => {
             }
           },
           unit_amount: shippingFee,
+        },
+        quantity: 1,
+      })
+    } else {
+      // Voeg gratis verzending toe als line item met bedrag 0
+      line_items.push({
+        price_data: {
+          currency: "eur",
+          product_data: { 
+            name: "🎉 Gratis verzending (vanaf €" + freeShippingThreshold.toFixed(2) + ")",
+            metadata: {
+              isShipping: "true"
+            }
+          },
+          unit_amount: 0,
         },
         quantity: 1,
       })
