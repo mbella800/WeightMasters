@@ -23,10 +23,14 @@ module.exports = async (req, res) => {
     const checkoutSlug = data.checkoutSlug
 
     if (!checkoutSlug) throw new Error("checkoutSlug ontbreekt in request")
+    if (!items.length) throw new Error("Geen items in winkelwagen")
+
+    // ✅ Haal FreeShippingTreshold uit het eerste item (alle items hebben dezelfde waarde)
+    const freeShippingThreshold = Number(items[0].FreeShippingTreshold)
+    if (isNaN(freeShippingThreshold)) throw new Error("FreeShippingTreshold is geen geldig getal")
 
     let subtotal = 0
     let totalWeight = 0
-    let freeShippingThreshold = 0
     const line_items = []
     let stripeCouponId = null
 
@@ -40,8 +44,8 @@ module.exports = async (req, res) => {
       const quantity = item.quantity || 1
       
       // ✅ DISCOUNT BEREKENINGEN
-      const originalPrice = Number(item["Original Price"] || item["Product Price"] || item.productPrice || 0)
-      const salePrice = Number(item["SalePriceOptioneel"] || item["Sale Price Optioneel"] || 0)
+      const originalPrice = Number(item["Product Price"] || 0)
+      const salePrice = Number(item["Sale Price Optioneel"] || 0)
       
       // Effectieve prijs: sale price als beschikbaar, anders originele prijs
       const effectivePrice = (salePrice > 0 && salePrice < originalPrice) ? salePrice : originalPrice
@@ -61,15 +65,9 @@ module.exports = async (req, res) => {
       totalSavedAmount += Math.round(itemSavings * 100) // Savings already include BTW
       
       // Weight berekening voor gratis verzending
-      const itemWeight = Number(item["Weight"] || 0)
+      const itemWeight = Number(item["Weight (g)"] || 0)
       totalWeight += itemWeight * quantity
       
-      // Hoogste free shipping threshold gebruiken
-      const threshold = Number(item["Free Shipping Threshold"] || 50)
-      if (threshold > freeShippingThreshold) {
-        freeShippingThreshold = threshold
-      }
-
       // Stripe Coupon ID opslaan (eerste item met coupon)
       if (!stripeCouponId && item["Coupon ID"]) {
         stripeCouponId = item["Coupon ID"]
@@ -93,13 +91,13 @@ module.exports = async (req, res) => {
           currency: "eur",
           product_data: {
             name: hasDiscount 
-              ? `${item["Product Name"] || item.title || "Product"} (incl. BTW) 🎉 -${discountPercentage}%`
-              : `${item["Product Name"] || item.title || "Product"} (incl. BTW)`,
-            images: [item["Product Image"] || item["ProductImage"]].filter(Boolean),
+              ? `${item["Product Name"] || "Product"} (incl. BTW) 🎉 -${discountPercentage}%`
+              : `${item["Product Name"] || "Product"} (incl. BTW)`,
+            images: [item["Product Image"]].filter(Boolean),
             metadata: {
               weight: itemWeight.toString(),
-              stripePriceId: item["Stripe Price ID"] || "",
-              stripeProductId: item["Stripe Product Id"] || "",
+              stripePriceId: item.price || "",
+              stripeProductId: item.stripeProductId || "",
               originalPrice: originalPrice.toString(), // Already includes BTW
               effectivePrice: effectivePrice.toString(), // Already includes BTW
               salePrice: hasDiscount ? salePrice.toString() : "", // Already includes BTW
@@ -130,7 +128,7 @@ module.exports = async (req, res) => {
       else shippingFee = 995 // €9,95
     }
 
-    // Verzendkosten toevoegen
+    // Verzendkosten toevoegen alleen als er daadwerkelijk verzendkosten zijn
     if (shippingFee > 0) {
       line_items.push({
         price_data: {
@@ -142,20 +140,6 @@ module.exports = async (req, res) => {
             }
           },
           unit_amount: shippingFee,
-        },
-        quantity: 1,
-      })
-    } else {
-      line_items.push({
-        price_data: {
-          currency: "eur",
-          product_data: { 
-            name: "🎉 Gratis verzending",
-            metadata: {
-              isShipping: "true"
-            }
-          },
-          unit_amount: 0,
         },
         quantity: 1,
       })
@@ -219,10 +203,10 @@ module.exports = async (req, res) => {
     }
 
     const session = await stripe.checkout.sessions.create(sessionConfig)
+    return res.status(200).json({ url: session.url })
 
-    res.status(200).json({ id: session.id, url: session.url })
   } catch (err) {
-    console.error("Checkout fout:", err)
-    res.status(500).end("Internal Server Error")
+    console.error("Checkout error:", err)
+    return res.status(500).json({ error: err.message })
   }
 }
