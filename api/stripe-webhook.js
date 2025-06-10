@@ -165,10 +165,10 @@ export default async function handler(req, res) {
   }
 
   const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET_EMAIL;
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
   if (!webhookSecret) {
-    console.error('❌ Missing STRIPE_WEBHOOK_SECRET_EMAIL environment variable');
+    console.error('❌ Missing STRIPE_WEBHOOK_SECRET environment variable');
     return res.status(500).json({ error: 'Webhook secret not configured' });
   }
 

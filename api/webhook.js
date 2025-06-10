@@ -281,8 +281,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    const buf = await buffer(req);
-    const event = stripe.webhooks.constructEvent(buf, sig, webhookSecret);
+    const rawBody = await getRawBody(req);
+    const event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
 
     console.log('✅ Sheet webhook signature verified');
     await sheetWebhook(event);
