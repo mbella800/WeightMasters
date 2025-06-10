@@ -208,21 +208,6 @@ async function resetSheet(sheets) {
   }
 }
 
-const calculateShippingCost = (items) => {
-  // Calculate total weight
-  const totalWeight = items.reduce((total, item) => {
-    const weight = parseFloat(item.price?.product?.metadata?.weight || 0);
-    return total + (weight * item.quantity);
-  }, 0);
-
-  // Shipping cost calculation based on weight in grams
-  if (totalWeight <= 20) return 1.00; // €1,00 briefpost
-  if (totalWeight <= 50) return 2.00; // €2,00
-  if (totalWeight <= 500) return 4.10; // €4,10 brievenbuspakje
-  if (totalWeight <= 2000) return 6.95; // €6,95 standaard pakket
-  return 9.95; // €9,95 zwaar pakket (>2000g)
-};
-
 async function sheetWebhook(event) {
   if (event.type === "checkout.session.completed") {
     try {
