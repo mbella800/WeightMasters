@@ -1,6 +1,11 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
-const { google } = require('googleapis')
-const { buffer } = require('micro')
+import { headers } from 'next/headers';
+import { NextResponse } from 'next/server';
+import Stripe from 'stripe';
+import { google } from 'googleapis';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: '2022-11-15',
+});
 
 // Disable body parsing, we need the raw body for signature verification
 export const config = {
@@ -266,34 +271,32 @@ async function sheetWebhook(event) {
   return { success: true };
 }
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).end('Method Not Allowed');
-  }
-
-  const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-  if (!webhookSecret) {
-    console.error('❌ Missing STRIPE_WEBHOOK_SECRET environment variable');
-    return res.status(500).json({ error: 'Webhook secret not configured' });
-  }
-
+export async function POST(request) {
+  const headersList = headers();
+  const signature = headersList.get('stripe-signature');
+  
   try {
-    const rawBody = await getRawBody(req);
-    const event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
-
-    console.log('✅ Sheet webhook signature verified');
-    await sheetWebhook(event);
+    // Get raw body as text
+    const rawBody = await request.text();
     
-    res.status(200).json({ received: true });
+    // Construct and verify the event
+    const event = stripe.webhooks.constructEvent(
+      rawBody,
+      signature,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
+
+    console.log('✅ Success: Webhook signature verified');
+    console.log('Event type:', event.type);
+    
+    await sheetWebhook(event);
+    return NextResponse.json({ received: true });
+    
   } catch (err) {
     console.error('❌ Webhook error:', err.message);
-    res.status(400).json({
-      error: {
-        message: err.message
-      }
-    });
+    return NextResponse.json(
+      { error: `Webhook Error: ${err.message}` },
+      { status: 400 }
+    );
   }
 } 

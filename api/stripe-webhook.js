@@ -1,13 +1,11 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const SibApiV3Sdk = require('sib-api-v3-sdk');
-const { buffer } = require('micro');
+import { headers } from 'next/headers';
+import { NextResponse } from 'next/server';
+import Stripe from 'stripe';
+import SibApiV3Sdk from 'sib-api-v3-sdk';
 
-// Disable body parsing, we need the raw body for signature verification
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: '2022-11-15',
+});
 
 // Initialize Brevo API client
 const defaultClient = SibApiV3Sdk.ApiClient.instance;
@@ -20,15 +18,6 @@ function capitalizeWords(str) {
   return str.toLowerCase().split(' ').map(word => 
     word.charAt(0).toUpperCase() + word.slice(1)
   ).join(' ');
-}
-
-// Hulpfunctie om raw body te lezen
-async function getRawBody(req) {
-  const chunks = []
-  for await (const chunk of req) {
-    chunks.push(chunk)
-  }
-  return Buffer.concat(chunks)
 }
 
 async function sendOrderConfirmationEmail(session) {
@@ -86,11 +75,19 @@ async function sendOrderConfirmationEmail(session) {
 
     // Check if shipping is free based on the actual shipping amount from Stripe
     const isFreeShipping = shippingAmount === 0;
+    const shippingCost = (shippingAmount / 100).toFixed(2).replace('.', ',');
+    
+    // Only show free shipping text if shipping amount is actually 0
     const shippingInfo = isFreeShipping ? 
       "🎉 Gratis verzending" : 
-      `Verzendkosten (incl. BTW): €${(shippingAmount / 100).toFixed(2).replace('.', ',')}`;
+      `Verzendkosten (incl. BTW): €${shippingCost}`;
 
-    console.log('📦 Shipping info:', { isFreeShipping, shippingAmount, shippingInfo });
+    console.log('📦 Shipping info:', { 
+      isFreeShipping, 
+      shippingAmount, 
+      shippingCost,
+      shippingInfo 
+    });
 
     const emailPayload = {
       sender: {
@@ -106,34 +103,35 @@ async function sendOrderConfirmationEmail(session) {
         name: capitalizeWords(customer_name) || "Klant",
         email: customer_email,
         orderId: session.payment_intent,
-        subtotal: (subtotal / 100).toFixed(2),
-        shipping: (shippingAmount / 100).toFixed(2),
-        tax: "0.00",
-        total: (total / 100).toFixed(2),
+        subtotal: (subtotal / 100).toFixed(2).replace('.', ','),
+        shipping: shippingCost,
+        tax: "0,00",
+        total: (total / 100).toFixed(2).replace('.', ','),
         shopName: "Weightmasters",
         items: items.map(item => ({
           productName: item.productName.replace(' (incl. BTW)', ''),
           productImage: item.productImage,
-          productPrice: item.productPrice,
+          productPrice: item.productPrice.replace('.', ','),
           quantity: item.quantity,
-          originalPrice: item.hasDiscount ? item.originalPrice : null,
+          originalPrice: item.hasDiscount ? item.originalPrice.replace('.', ',') : null,
           discountPercentage: item.hasDiscount ? item.discountPercentage : null,
-          totalPrice: item.totalPrice,
-          totalOriginalPrice: item.hasDiscount ? item.totalOriginalPrice : null
+          totalPrice: item.totalPrice.replace('.', ','),
+          totalOriginalPrice: item.hasDiscount ? item.totalOriginalPrice.replace('.', ',') : null
         })),
         hasDiscount: itemsWithDiscount.length > 0,
         discountItems: itemsWithDiscount.map(item => ({
           productName: item.productName.replace(' (incl. BTW)', ''),
-          originalPrice: item.originalPrice,
-          newPrice: item.productPrice,
-          savedAmount: item.itemSavings,
+          originalPrice: item.originalPrice.replace('.', ','),
+          newPrice: item.productPrice.replace('.', ','),
+          savedAmount: item.itemSavings.replace('.', ','),
           discountPercentage: item.discountPercentage,
           quantity: item.quantity,
-          totalSaved: (parseFloat(item.itemSavings) * item.quantity).toFixed(2)
+          totalSaved: (parseFloat(item.itemSavings) * item.quantity).toFixed(2).replace('.', ',')
         })),
         totalSaved: itemsWithDiscount.reduce((sum, item) => 
-          sum + (parseFloat(item.itemSavings) * item.quantity), 0).toFixed(2),
-        shippingInfo: shippingInfo
+          sum + (parseFloat(item.itemSavings) * item.quantity), 0).toFixed(2).replace('.', ','),
+        shippingInfo: shippingInfo,
+        isFreeShipping: isFreeShipping
       }
     };
 
@@ -146,25 +144,23 @@ async function sendOrderConfirmationEmail(session) {
   }
 }
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).end('Method Not Allowed');
-  }
-
-  const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-  if (!webhookSecret) {
-    console.error('❌ Missing STRIPE_WEBHOOK_SECRET environment variable');
-    return res.status(500).json({ error: 'Webhook secret not configured' });
-  }
-
+export async function POST(request) {
+  const headersList = headers();
+  const signature = headersList.get('stripe-signature');
+  
   try {
-    const buf = await buffer(req);
-    const event = stripe.webhooks.constructEvent(buf, sig, webhookSecret);
+    // Get raw body as text
+    const rawBody = await request.text();
+    
+    // Construct and verify the event
+    const event = stripe.webhooks.constructEvent(
+      rawBody,
+      signature,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
 
-    console.log('✅ Email webhook signature verified');
+    console.log('✅ Success: Email webhook signature verified');
+    console.log('Event type:', event.type);
 
     if (event.type === 'checkout.session.completed') {
       const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
@@ -172,20 +168,18 @@ export default async function handler(req, res) {
       });
 
       await sendOrderConfirmationEmail(session);
-      res.status(200).json({ received: true });
+      return NextResponse.json({ received: true });
     } else {
-      res.status(400).json({
-        error: {
-          message: 'Unhandled event type'
-        }
-      });
+      return NextResponse.json(
+        { error: 'Unhandled event type' },
+        { status: 400 }
+      );
     }
   } catch (err) {
     console.error('❌ Webhook error:', err.message);
-    res.status(400).json({
-      error: {
-        message: err.message
-      }
-    });
+    return NextResponse.json(
+      { error: `Webhook Error: ${err.message}` },
+      { status: 400 }
+    );
   }
 }
