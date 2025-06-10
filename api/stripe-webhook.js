@@ -101,6 +101,7 @@ module.exports = async function handler(req, res) {
             email: customer_email,
             name: customer_name || "Klant"
           }],
+          templateId: parseInt(process.env.BREVO_TEMPLATE_ID),
           params: {
             name: capitalizeWords(customer_name) || "Klant",
             email: customer_email,
@@ -139,8 +140,7 @@ module.exports = async function handler(req, res) {
         }
 
         console.log("📧 Sending order confirmation email...")
-        const templateId = process.env.BREVO_TEMPLATE_ID
-        const response = await fetch(`https://api.brevo.com/v3/smtp/templates/${templateId}/send`, {
+        const response = await fetch("https://api.brevo.com/v3/smtp/email", {
           method: "POST",
           headers: {
             "api-key": process.env.BREVO_API_KEY,
