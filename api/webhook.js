@@ -82,22 +82,26 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Get the raw body using micro's buffer function
+    // Get the raw body as a buffer
     const rawBody = await buffer(req);
     console.log('📝 Raw body length:', rawBody.length);
-    
-    // Pass the raw buffer to constructEvent
-    const event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
-    console.log('✅ Sheet webhook signature verified');
-    
+
+    // Construct and verify the event using the raw buffer
+    const event = stripe.webhooks.constructEvent(
+      rawBody,
+      sig,
+      webhookSecret
+    );
+
+    console.log('✅ Success: Webhook signature verified');
+    console.log('Event type:', event.type);
+
+    // Handle the event
     await sheetWebhook(event);
+
     res.status(200).json({ received: true });
   } catch (err) {
-    console.error('❌ Webhook error:', err.message);
-    res.status(400).json({
-      error: {
-        message: err.message
-      }
-    });
+    console.error('❌ Error:', err.message);
+    res.status(400).json({ error: `Webhook Error: ${err.message}` });
   }
 } 
