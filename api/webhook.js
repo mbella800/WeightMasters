@@ -41,9 +41,11 @@ async function updateGoogleSheet(session) {
       price: (item.price.unit_amount / 100).toFixed(2).replace('.', ',')
     }));
 
-    const shippingFee = session.total_details?.amount_shipping || 0;
+    // Zoek verzendkosten line item
+    const shippingLine = lineItems.data.find(item => item.description && item.description.toLowerCase().includes('verzendkosten'));
+    const shippingFee = shippingLine ? shippingLine.amount_total || (shippingLine.amount_subtotal || 0) : 0;
     const shippingFeeStr = (shippingFee / 100).toFixed(2).replace('.', ',');
-    console.log('📦 SHIPPING DEBUG SHEET-WEBHOOK:', { shippingFee, shippingFeeStr });
+    console.log('📦 SHIPPING DEBUG SHEET-WEBHOOK (line item):', { shippingFee, shippingFeeStr });
 
     const orderData = {
       'Order ID': session.payment_intent,

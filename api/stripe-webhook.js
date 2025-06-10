@@ -68,9 +68,11 @@ async function sendOrderConfirmationEmail(session) {
 
     const itemsWithDiscount = items.filter(item => item.hasDiscount);
     const subtotal = session.amount_subtotal;
-    const shippingFee = session.total_details?.amount_shipping || 0;
+    // Zoek verzendkosten line item
+    const shippingLine = lineItems.data.find(item => item.description && item.description.toLowerCase().includes('verzendkosten'));
+    const shippingFee = shippingLine ? shippingLine.amount_total || (shippingLine.amount_subtotal || 0) : 0;
     const shippingFeeStr = (shippingFee / 100).toFixed(2).replace('.', ',');
-    console.log('📦 SHIPPING DEBUG STRIPE-WEBHOOK:', { shippingFee, shippingFeeStr });
+    console.log('📦 SHIPPING DEBUG STRIPE-WEBHOOK (line item):', { shippingFee, shippingFeeStr });
     const total = session.amount_total;
 
     const emailPayload = {
