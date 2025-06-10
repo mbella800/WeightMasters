@@ -214,52 +214,14 @@ const calculateShippingCost = (items) => {
   return 9.95; // €9,95 zwaar pakket (>2000g)
 };
 
-async function sheetWebhook(event, res) {
+async function sheetWebhook(req) {
+  const event = req.body;
+  
   if (event.type === "checkout.session.completed") {
     try {
       const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
         expand: ['line_items.data.price.product']
       });
-
-      const sheets = await getGoogleSheetClient();
-      
-      // Initialize sheet if needed (only sets headers if they don't exist)
-      await initializeSheet(sheets);
-
-      const { shipping, subtotal, total } = calculateOrderTotals(session);
-      const products = session.line_items.data;
-
-      // Calculate total savings and format product list
-      let totalSavings = 0;
-      let maxSavingsPerItem = 0;
-      const formattedProducts = products.map(item => {
-        const productName = item.description?.replace(/🎉.*$/, "").trim() || "";
-        const quantity = item.quantity || 1;
-        const currentPrice = (item.price.unit_amount || 0) / 100;
-        const metadata = item.price?.product?.metadata || {};
-        
-        const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice;
-        const hasDiscount = originalPrice > currentPrice;
-        const savingsPerItem = hasDiscount ? (originalPrice - currentPrice) : 0;
-        const itemTotalSavings = savingsPerItem * quantity;
-
-        totalSavings += itemTotalSavings;
-        if (savingsPerItem > maxSavingsPerItem) {
-          maxSavingsPerItem = savingsPerItem;
-        }
-
-        return `${productName} (${quantity}x ${formatPrice(currentPrice)})`;
-      }).join(', ');
-
-      // Calculate highest discount percentage
-      const maxDiscount = products.reduce((max, item) => {
-        const currentPrice = (item.price.unit_amount || 0) / 100;
-        const metadata = item.price?.product?.metadata || {};
-        const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice;
-        const discountPercentage = originalPrice > currentPrice ? 
-          Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : 0;
-        return Math.max(max, discountPercentage);
-      }, 0);
 
       const customer_email = session.customer_details?.email || "";
       const customer_name = session.customer_details?.name || "";
@@ -290,65 +252,46 @@ async function sheetWebhook(event, res) {
       console.log('Values to be added:', values);
       console.log('Shipping amount from session:', (shippingAmount / 100).toFixed(2));
 
-      const result = await sheets.spreadsheets.values.append({
-        spreadsheetId: process.env.DEFAULT_SHEET_ID,
-        range: 'Bestellingen!A:H',
+      const sheets = google.sheets({ version: 'v4', auth });
+      const spreadsheetId = process.env.DEFAULT_SHEET_ID;
+
+      await sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: 'Orders!A:H',
         valueInputOption: 'USER_ENTERED',
         resource: { values },
       });
 
       console.log('✅ Order added to Google Sheet successfully');
-      return {
-        statusCode: 200,
-        body: JSON.stringify({
-          received: true,
-          message: "Order processed successfully"
-        })
-      };
+      return { success: true };
 
     } catch (error) {
       console.error('❌ Error processing order:', error);
-      return {
-        statusCode: 400,
-        body: JSON.stringify({
-          error: {
-            message: error.message
-          }
-        })
-      };
+      throw error;
     }
   }
 
-  return {
-    statusCode: 400,
-    body: JSON.stringify({
-      error: {
-        message: 'Unhandled event type'
-      }
-    })
-  };
+  return { success: true };
 }
 
 module.exports = async (req, res) => {
   if (req.method === 'POST') {
     const sig = req.headers['stripe-signature'];
+    const rawBody = req.rawBody; // Next.js provides this
+
     console.log('🔍 Verifying sheet webhook signature...');
 
     try {
       const event = stripe.webhooks.constructEvent(
-        req.body,
+        rawBody,
         sig,
         process.env.STRIPE_WEBHOOK_SECRET
       );
 
       console.log('✅ Sheet webhook signature verified');
-      const result = await sheetWebhook(event, res);
+      const result = await sheetWebhook(req);
       
-      if (result.statusCode === 200) {
-        res.status(200).json(JSON.parse(result.body));
-      } else {
-        res.status(result.statusCode).json(JSON.parse(result.body));
-      }
+      res.status(200).json({ received: true });
     } catch (err) {
       console.error('❌ Webhook error:', err.message);
       res.status(400).json({
