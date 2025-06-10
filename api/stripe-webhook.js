@@ -16,10 +16,8 @@ apiKey.apiKey = process.env.BREVO_API_KEY;
 const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
 
 function capitalizeWords(str) {
-  if (!str) return "";
-  return str.toLowerCase().split(' ').map(word => 
-    word.charAt(0).toUpperCase() + word.slice(1)
-  ).join(' ');
+  if (!str) return '';
+  return str.toLowerCase().replace(/(^|\s)\S/g, l => l.toUpperCase());
 }
 
 async function sendOrderConfirmationEmail(session) {
@@ -45,7 +43,6 @@ async function sendOrderConfirmationEmail(session) {
         const productImage = item.price?.product?.images?.[0] || "";
         const currentPrice = item.price.unit_amount / 100;
         
-        // Get the original price from the product metadata
         const metadata = item.price?.product?.metadata || {};
         const originalPrice = metadata.originalPrice ? 
           parseFloat(metadata.originalPrice) : 
@@ -54,14 +51,14 @@ async function sendOrderConfirmationEmail(session) {
         const hasDiscount = originalPrice > currentPrice;
         const discountPercentage = hasDiscount ? 
           Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : 0;
-
-        return {
+          
+          return {
           productName,
-          productImage,
+            productImage,
           productPrice: currentPrice.toFixed(2).replace('.', ','),
           originalPrice: originalPrice.toFixed(2).replace('.', ','),
-          hasDiscount,
-          discountPercentage,
+            hasDiscount,
+            discountPercentage,
           itemSavings: hasDiscount ? (originalPrice - currentPrice).toFixed(2).replace('.', ',') : "0,00",
           quantity: item.quantity,
           totalPrice: (currentPrice * item.quantity).toFixed(2).replace('.', ','),
@@ -74,27 +71,8 @@ async function sendOrderConfirmationEmail(session) {
     const shippingFee = session.total_details?.amount_shipping || 0;
     const total = session.amount_total;
 
-    console.log('💰 Order details:', {
-      subtotal: (subtotal / 100).toFixed(2),
-      shippingFee: (shippingFee / 100).toFixed(2),
-      total: (total / 100).toFixed(2)
-    });
-
-    // Check if shipping is free based on the actual shipping amount from Stripe
-    const isFreeShipping = shippingFee === 0;
-    const shippingCost = (shippingFee / 100).toFixed(2).replace('.', ',');
-    
-    // Only show free shipping text if shipping amount is actually 0
-    const shippingInfo = isFreeShipping ? 
-      "🎉 Gratis verzending" : 
-      `Verzendkosten (incl. BTW): €${shippingCost}`;
-
-    console.log('📦 Shipping info:', { 
-      isFreeShipping, 
-      shippingFee, 
-      shippingCost,
-      shippingInfo 
-    });
+    // shippingFee altijd als string met 2 decimalen en komma
+    const shippingFeeStr = (shippingFee / 100).toFixed(2).replace('.', ',');
 
     const emailPayload = {
       sender: {
@@ -111,7 +89,7 @@ async function sendOrderConfirmationEmail(session) {
         email: customer_email,
         orderId: session.payment_intent,
         subtotal: (subtotal / 100).toFixed(2).replace('.', ','),
-        shipping: shippingCost,
+        shippingFee: shippingFeeStr,
         tax: "0,00",
         total: (total / 100).toFixed(2).replace('.', ','),
         shopName: "Weightmasters",
@@ -136,9 +114,7 @@ async function sendOrderConfirmationEmail(session) {
           totalSaved: (parseFloat(item.itemSavings.replace(',', '.')) * item.quantity).toFixed(2).replace('.', ',')
         })),
         totalSaved: itemsWithDiscount.reduce((sum, item) => 
-          sum + (parseFloat(item.itemSavings.replace(',', '.')) * item.quantity), 0).toFixed(2).replace('.', ','),
-        shippingInfo: shippingInfo,
-        isFreeShipping: isFreeShipping
+          sum + (parseFloat(item.itemSavings.replace(',', '.')) * item.quantity), 0).toFixed(2).replace('.', ',')
       }
     };
 
@@ -185,14 +161,14 @@ export default async function handler(req, res) {
 
       await sendOrderConfirmationEmail(session);
       res.json({ received: true });
-    } else {
+      } else {
       res.status(400).json({
         error: {
           message: 'Unhandled event type'
         }
       });
-    }
-  } catch (err) {
+      }
+    } catch (err) {
     console.error('❌ Webhook error:', err.message);
     console.error('Stack trace:', err.stack);
     res.status(400).json({

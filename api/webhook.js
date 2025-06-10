@@ -1,5 +1,4 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const { google } = require('googleapis');
 const { buffer } = require('micro');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 
@@ -10,62 +9,63 @@ export const config = {
   },
 };
 
-async function sheetWebhook(event) {
-  if (event.type === "checkout.session.completed") {
-    try {
-      const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
-        expand: ['line_items.data.price.product']
-      });
-
-      const customer_email = session.customer_details?.email || "";
-      const customer_name = session.customer_details?.name || "";
-      const shippingAmount = session.total_details?.amount_shipping || 0;
-
-      const lineItems = await stripe.checkout.sessions.listLineItems(
-        session.id,
-        { expand: ['data.price.product'] }
-      );
-
-      const items = lineItems.data.filter(item => !item.description?.toLowerCase().includes('verzend'));
-
-      // Add to Google Sheet
-      const values = [
-        [
-          new Date().toISOString(),
-          session.payment_intent,
-          customer_email,
-          customer_name,
-          items.map(item => `${item.quantity}x ${item.description}`).join(", "),
-          (session.amount_subtotal / 100).toFixed(2),
-          (shippingAmount / 100).toFixed(2),
-          (session.amount_total / 100).toFixed(2)
-        ]
-      ];
-
-      console.log('📝 Adding order to Google Sheet...');
-      console.log('Values to be added:', values);
-      console.log('Shipping amount from session:', (shippingAmount / 100).toFixed(2));
-
-      const sheets = google.sheets({ version: 'v4', auth });
-      const spreadsheetId = process.env.DEFAULT_SHEET_ID;
-
-      await sheets.spreadsheets.values.append({
-        spreadsheetId,
-        range: 'Orders!A:H',
-        valueInputOption: 'USER_ENTERED',
-        resource: { values },
-      });
-
-      console.log('✅ Order added to Google Sheet successfully');
-      return { success: true };
-
-    } catch (error) {
-      console.error('❌ Error processing order:', error);
-      throw error;
-    }
+async function getGoogleSheetClient() {
+  try {
+    const doc = new GoogleSpreadsheet(process.env.DEFAULT_SHEET_ID);
+    const credentials = JSON.parse(process.env.GOOGLE_SERVICE_KEY);
+    await doc.useServiceAccountAuth(credentials);
+    await doc.loadInfo();
+    return doc;
+  } catch (error) {
+    console.error('Error initializing Google Sheets:', error);
+    return null;
   }
+}
 
-  return { success: true };
+async function updateGoogleSheet(session) {
+  try {
+    const doc = await getGoogleSheetClient();
+    if (!doc) {
+      throw new Error('Failed to initialize Google Sheets client');
+    }
+
+    const sheet = doc.sheetsByIndex[0];
+    const customer = session.customer_details;
+    const lineItems = await stripe.checkout.sessions.listLineItems(session.id, {
+      expand: ['data.price.product']
+    });
+
+    const items = lineItems.data.map(item => ({
+      name: item.description,
+      quantity: item.quantity,
+      price: (item.price.unit_amount / 100).toFixed(2).replace('.', ',')
+    }));
+
+    const shippingFee = session.total_details?.amount_shipping || 0;
+    const shippingFeeStr = (shippingFee / 100).toFixed(2).replace('.', ',');
+
+    const orderData = {
+      'Order ID': session.payment_intent,
+      'Date': new Date().toLocaleString('nl-NL', { timeZone: 'Europe/Amsterdam' }),
+      'Customer Name': customer.name || '',
+      'Email': customer.email || '',
+      'Address': `${customer.address?.line1 || ''} ${customer.address?.line2 || ''}`,
+      'City': customer.address?.city || '',
+      'Postal Code': customer.address?.postal_code || '',
+      'Country': customer.address?.country || '',
+      'Products': items.map(item => `${item.name} (${item.quantity}x €${item.price})`).join(', '),
+      'Subtotal': (session.amount_subtotal / 100).toFixed(2).replace('.', ','),
+      'Shipping': shippingFeeStr,
+      'Total': (session.amount_total / 100).toFixed(2).replace('.', ',')
+    };
+
+    await sheet.addRow(orderData);
+    console.log('✅ Order added to Google Sheet');
+    return true;
+  } catch (error) {
+    console.error('❌ Error updating Google Sheet:', error);
+    throw error;
+  }
 }
 
 export default async function handler(req, res) {
@@ -106,7 +106,7 @@ export default async function handler(req, res) {
         }
       });
     }
-  } catch (err) {
+    } catch (err) {
     console.error('❌ Webhook error:', err.message);
     res.status(400).json({
       error: {
