@@ -9,61 +9,81 @@ export const config = {
 };
 
 async function sheetWebhook(event) {
-  if (event.type === "checkout.session.completed") {
-    try {
-      const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
-        expand: ['line_items.data.price.product']
+  try {
+    const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
+      expand: ['line_items.data.price.product']
+    });
+
+    const lineItems = await stripe.checkout.sessions.listLineItems(
+      session.id,
+      { expand: ['data.price.product'] }
+    );
+
+    const items = lineItems.data
+      .filter(item => !item.description?.toLowerCase().includes('verzend'))
+      .map(item => {
+        const productName = item.description?.replace(/🎉.*$/, "").trim() || "";
+        const productImage = item.price?.product?.images?.[0] || "";
+        const metadata = item.price?.product?.metadata || {};
+        const currentPrice = item.price.unit_amount / 100;
+        const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice;
+        const hasDiscount = originalPrice > currentPrice;
+
+        return {
+          "Product Name": productName,
+          "Product Image": productImage,
+          "Product Price": currentPrice.toFixed(2).replace('.', ','),
+          "Sale Price Optioneel": hasDiscount ? currentPrice.toFixed(2).replace('.', ',') : null,
+          quantity: item.quantity,
+          totalPrice: (currentPrice * item.quantity).toFixed(2).replace('.', ',')
+        };
       });
 
-      const customer_email = session.customer_details?.email || "";
-      const customer_name = session.customer_details?.name || "";
-      const shippingAmount = session.total_details?.amount_shipping || 0;
+    const subtotal = session.amount_subtotal;
+    const shippingAmount = session.total_details?.amount_shipping || 0;
+    const total = session.amount_total;
 
-      const lineItems = await stripe.checkout.sessions.listLineItems(
-        session.id,
-        { expand: ['data.price.product'] }
-      );
+    // Get the Google Sheets credentials and spreadsheet ID
+    const auth = new google.auth.GoogleAuth({
+      credentials: JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS),
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
 
-      const items = lineItems.data.filter(item => !item.description?.toLowerCase().includes('verzend'));
+    const sheets = google.sheets({ version: 'v4', auth });
+    const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
 
-      // Add to Google Sheet
-      const values = [
-        [
-          new Date().toISOString(),
-          session.payment_intent,
-          customer_email,
-          customer_name,
-          items.map(item => `${item.quantity}x ${item.description}`).join(", "),
-          (session.amount_subtotal / 100).toFixed(2),
-          (shippingAmount / 100).toFixed(2),
-          (session.amount_total / 100).toFixed(2)
-        ]
-      ];
+    // Prepare the row data
+    const orderData = items.map(item => [
+      new Date().toISOString(),                    // Timestamp
+      session.payment_intent,                      // Order ID
+      session.customer_details?.name || "",        // Customer Name
+      session.customer_details?.email || "",       // Customer Email
+      item["Product Name"],                        // Product Name
+      item.quantity,                               // Quantity
+      item["Product Price"],                       // Product Price
+      item["Sale Price Optioneel"] || "",         // Sale Price
+      item.totalPrice,                            // Total Price
+      (shippingAmount / 100).toFixed(2).replace('.', ','), // Shipping Cost
+      (total / 100).toFixed(2).replace('.', ',')  // Total Amount
+    ]);
 
-      console.log('📝 Adding order to Google Sheet...');
-      console.log('Values to be added:', values);
-      console.log('Shipping amount from session:', (shippingAmount / 100).toFixed(2));
+    // Append the data to the sheet
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: 'Orders!A:K',
+      valueInputOption: 'USER_ENTERED',
+      insertDataOption: 'INSERT_ROWS',
+      resource: {
+        values: orderData
+      },
+    });
 
-      const sheets = google.sheets({ version: 'v4', auth });
-      const spreadsheetId = process.env.DEFAULT_SHEET_ID;
-
-      await sheets.spreadsheets.values.append({
-        spreadsheetId,
-        range: 'Orders!A:H',
-        valueInputOption: 'USER_ENTERED',
-        resource: { values },
-      });
-
-      console.log('✅ Order added to Google Sheet successfully');
-      return { success: true };
-
-    } catch (error) {
-      console.error('❌ Error processing order:', error);
-      throw error;
-    }
+    console.log('✅ Order data added to Google Sheet');
+    return true;
+  } catch (error) {
+    console.error('❌ Error updating Google Sheet:', error);
+    throw error;
   }
-
-  return { success: true };
 }
 
 export default async function handler(req, res) {

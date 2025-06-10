@@ -50,10 +50,10 @@ async function sendOrderConfirmationEmail(session) {
           Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : 0;
 
         return {
-          productName,
-          productImage,
-          productPrice: currentPrice.toFixed(2).replace('.', ','),
-          originalPrice: originalPrice.toFixed(2).replace('.', ','),
+          "Product Name": productName,
+          "Product Image": productImage,
+          "Product Price": currentPrice.toFixed(2).replace('.', ','),
+          "Sale Price Optioneel": hasDiscount ? currentPrice.toFixed(2).replace('.', ',') : null,
           hasDiscount,
           discountPercentage,
           itemSavings: hasDiscount ? (originalPrice - currentPrice).toFixed(2).replace('.', ',') : "0,00",
@@ -110,20 +110,20 @@ async function sendOrderConfirmationEmail(session) {
         total: (total / 100).toFixed(2).replace('.', ','),
         shopName: "Weightmasters",
         items: items.map(item => ({
-          productName: item.productName.replace(' (incl. BTW)', ''),
-          productImage: item.productImage,
-          productPrice: item.productPrice,
+          productName: item["Product Name"],
+          productImage: item["Product Image"],
+          productPrice: item["Product Price"],
           quantity: item.quantity,
-          originalPrice: item.hasDiscount ? item.originalPrice : null,
+          originalPrice: item.hasDiscount ? item.totalOriginalPrice : null,
           discountPercentage: item.hasDiscount ? item.discountPercentage : null,
           totalPrice: item.totalPrice,
           totalOriginalPrice: item.hasDiscount ? item.totalOriginalPrice : null
         })),
         hasDiscount: itemsWithDiscount.length > 0,
         discountItems: itemsWithDiscount.map(item => ({
-          productName: item.productName.replace(' (incl. BTW)', ''),
-          originalPrice: item.originalPrice,
-          newPrice: item.productPrice,
+          productName: item["Product Name"],
+          originalPrice: item.totalOriginalPrice,
+          newPrice: item.totalPrice,
           savedAmount: item.itemSavings,
           discountPercentage: item.discountPercentage,
           quantity: item.quantity,
