@@ -1,5 +1,4 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const { sendOrderConfirmationEmail } = require('../utils/email');
 
 // Disable body parsing, we need the raw body for signature verification
 const config = {
@@ -52,12 +51,6 @@ async function handler(req, res) {
 
     if (event.type === 'checkout.session.completed') {
       console.log('💳 Processing checkout session:', event.data.object.id);
-      const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
-        expand: ['line_items.data.price.product']
-      });
-
-      await sendOrderConfirmationEmail(session);
-      console.log('📧 Order confirmation email sent');
       res.status(200).json({ received: true });
     } else {
       console.log('⚠️ Unhandled event type:', event.type);

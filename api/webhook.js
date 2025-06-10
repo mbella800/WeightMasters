@@ -20,40 +20,44 @@ async function buffer(readable) {
 
 async function sheetWebhook(event) {
   try {
-    const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
-      expand: ['line_items.data.price.product']
-    });
+    const session = event.data.object;
+    const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
 
-    const lineItems = await stripe.checkout.sessions.listLineItems(
-      session.id,
-      { expand: ['data.price.product'] }
-    );
+    // Get customer details
+    const customer_email = session.customer_details?.email || '';
+    const customer_name = session.customer_details?.name || '';
 
-    const items = lineItems.data
-      .filter(item => !item.description?.toLowerCase().includes('verzend'))
-      .map(item => {
-        const productName = item.description?.replace(/🎉.*$/, "").trim() || "";
-        const productImage = item.price?.product?.images?.[0] || "";
-        const metadata = item.price?.product?.metadata || {};
-        const currentPrice = item.price.unit_amount / 100;
-        const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice;
-        const hasDiscount = originalPrice > currentPrice;
+    // Format line items
+    const items = lineItems.data.map(item => ({
+      name: item.description,
+      quantity: item.quantity,
+      price: (item.price.unit_amount / 100).toFixed(2)
+    }));
 
-        return {
-          "Product Name": productName,
-          "Product Image": productImage,
-          "Product Price": currentPrice.toFixed(2).replace('.', ','),
-          "Sale Price Optioneel": hasDiscount ? currentPrice.toFixed(2).replace('.', ',') : null,
-          quantity: item.quantity,
-          totalPrice: (currentPrice * item.quantity).toFixed(2).replace('.', ',')
-        };
-      });
+    // Calculate totals
+    const subtotal = session.amount_subtotal / 100;
+    const shipping = session.total_details?.amount_shipping / 100 || 0;
+    const total = session.amount_total / 100;
 
-    const subtotal = session.amount_subtotal;
-    const shippingAmount = session.total_details?.amount_shipping || 0;
-    const total = session.amount_total;
+    // Prepare row data
+    const timestamp = new Date().toISOString();
+    const orderId = session.payment_intent;
+    const itemsList = items.map(item => 
+      `${item.name} (${item.quantity}x €${item.price})`
+    ).join(', ');
 
-    // Get the Google Sheets credentials and spreadsheet ID
+    const rowData = [
+      timestamp,              // Timestamp
+      orderId,               // Order ID
+      customer_name,         // Name
+      customer_email,        // Email
+      itemsList,            // Products
+      subtotal.toFixed(2),  // Subtotal
+      shipping.toFixed(2),  // Shipping
+      total.toFixed(2),     // Total
+    ];
+
+    // Google Sheets API setup
     const auth = new google.auth.GoogleAuth({
       credentials: JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS),
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
@@ -61,37 +65,23 @@ async function sheetWebhook(event) {
 
     const sheets = google.sheets({ version: 'v4', auth });
     const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
+    const range = 'Orders!A:H';
 
-    // Prepare the row data
-    const orderData = items.map(item => [
-      new Date().toISOString(),                    // Timestamp
-      session.payment_intent,                      // Order ID
-      session.customer_details?.name || "",        // Customer Name
-      session.customer_details?.email || "",       // Customer Email
-      item["Product Name"],                        // Product Name
-      item.quantity,                               // Quantity
-      item["Product Price"],                       // Product Price
-      item["Sale Price Optioneel"] || "",         // Sale Price
-      item.totalPrice,                            // Total Price
-      (shippingAmount / 100).toFixed(2).replace('.', ','), // Shipping Cost
-      (total / 100).toFixed(2).replace('.', ',')  // Total Amount
-    ]);
-
-    // Append the data to the sheet
+    // Append the row
     await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: 'Orders!A:K',
+      range,
       valueInputOption: 'USER_ENTERED',
       insertDataOption: 'INSERT_ROWS',
       resource: {
-        values: orderData
+        values: [rowData],
       },
     });
 
-    console.log('✅ Order data added to Google Sheet');
+    console.log('✅ Order added to Google Sheet');
     return true;
   } catch (error) {
-    console.error('❌ Error updating Google Sheet:', error);
+    console.error('❌ Error updating sheet:', error);
     throw error;
   }
 }
@@ -119,16 +109,27 @@ async function handler(req, res) {
     console.log('📝 Debug - Raw body length:', buf.length);
     console.log('🔍 Debug - Raw body preview:', buf.toString().substring(0, 100));
 
+    // Log the exact webhook secret being used
+    console.log('🔑 Debug - Webhook secret length:', webhookSecret.length);
+    console.log('🔑 Debug - Webhook secret preview:', webhookSecret.substring(0, 5) + '...');
+
     const event = stripe.webhooks.constructEvent(buf, sig, webhookSecret);
 
     console.log('✅ Success: Webhook signature verified');
     console.log('Event type:', event.type);
 
-    // Handle the event
-    await sheetWebhook(event);
-    console.log('📊 Google Sheet updated successfully');
-    
-    res.status(200).json({ received: true });
+    if (event.type === 'checkout.session.completed') {
+      await sheetWebhook(event);
+      console.log('📊 Google Sheet updated successfully');
+      res.status(200).json({ received: true });
+    } else {
+      console.log('⚠️ Unhandled event type:', event.type);
+      res.status(400).json({
+        error: {
+          message: 'Unhandled event type'
+        }
+      });
+    }
   } catch (err) {
     console.error('❌ Error:', err.message);
     console.error('Stack trace:', err.stack);
