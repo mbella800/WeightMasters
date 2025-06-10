@@ -18,12 +18,8 @@ async function buffer(readable) {
   return Buffer.concat(chunks);
 }
 
-async function sheetWebhook(event) {
+async function sheetWebhook(session) {
   try {
-    const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
-      expand: ['line_items.data.price.product']
-    });
-
     const lineItems = await stripe.checkout.sessions.listLineItems(
       session.id,
       { expand: ['data.price.product'] }
@@ -33,7 +29,7 @@ async function sheetWebhook(event) {
     const customer_email = session.customer_details?.email || '';
     const customer_name = session.customer_details?.name || '';
     const timestamp = new Date().toISOString();
-    const orderId = session.payment_intent;
+    const orderId = session.metadata.orderId || session.id;
     const subtotal = session.amount_subtotal / 100;
     const shippingAmount = session.total_details?.amount_shipping / 100 || 0;
     const total = session.amount_total / 100;
@@ -86,12 +82,12 @@ async function sheetWebhook(event) {
 
     // Google Sheets API setup
     const auth = new google.auth.GoogleAuth({
-      credentials: JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS),
+      credentials: JSON.parse(process.env.GOOGLE_SERVICE_KEY),
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     });
 
     const sheets = google.sheets({ version: 'v4', auth });
-    const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
+    const spreadsheetId = process.env.DEFAULT_SHEET_ID;
 
     // Check if headers exist
     const response = await sheets.spreadsheets.values.get({
@@ -138,33 +134,36 @@ async function handler(req, res) {
   }
 
   const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET_SHEET;
 
   console.log('🔍 Debug - Headers:', JSON.stringify(req.headers, null, 2));
   console.log('🔑 Debug - Webhook Secret exists:', !!webhookSecret);
   console.log('📝 Debug - Signature:', sig);
 
   if (!webhookSecret) {
-    console.error('❌ Missing STRIPE_WEBHOOK_SECRET environment variable');
+    console.error('❌ Missing STRIPE_WEBHOOK_SECRET_SHEET environment variable');
     return res.status(500).json({ error: 'Webhook secret not configured' });
   }
 
   try {
-    const buf = await buffer(req);
-    console.log('📝 Debug - Raw body length:', buf.length);
-    console.log('🔍 Debug - Raw body preview:', buf.toString().substring(0, 100));
+    const rawBody = await buffer(req);
+    console.log('📝 Debug - Raw body length:', rawBody.length);
+    console.log('🔍 Debug - Raw body preview:', rawBody.toString().substring(0, 100));
 
     // Log the exact webhook secret being used
     console.log('🔑 Debug - Webhook secret length:', webhookSecret.length);
     console.log('🔑 Debug - Webhook secret preview:', webhookSecret.substring(0, 5) + '...');
 
-    const event = stripe.webhooks.constructEvent(buf, sig, webhookSecret);
+    const event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
 
     console.log('✅ Success: Webhook signature verified');
     console.log('Event type:', event.type);
 
     if (event.type === 'checkout.session.completed') {
-      await sheetWebhook(event);
+      const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
+        expand: ['line_items.data.price.product']
+      });
+      await sheetWebhook(session);
       console.log('📊 Google Sheet updated successfully');
       res.status(200).json({ received: true });
     } else {
