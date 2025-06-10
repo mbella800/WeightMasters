@@ -160,15 +160,15 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Get the raw request body as a string
+    // Get the raw request body as a buffer
     const chunks = [];
     for await (const chunk of req) {
-      chunks.push(chunk);
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
     }
-    const rawBody = Buffer.concat(chunks).toString('utf8');
+    const rawBody = Buffer.concat(chunks);
     console.log('📝 Raw body length:', rawBody.length);
 
-    // Construct and verify the event using the raw string
+    // Construct and verify the event using the raw buffer
     const event = stripe.webhooks.constructEvent(
       rawBody,
       sig,
