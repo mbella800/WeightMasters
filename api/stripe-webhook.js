@@ -73,7 +73,7 @@ module.exports = async function handler(req, res) {
             Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : 0
 
           return {
-            productName: productName,
+            productName,
             productImage,
             productPrice: currentPrice.toFixed(2),
             originalPrice: originalPrice.toFixed(2),
@@ -88,13 +88,8 @@ module.exports = async function handler(req, res) {
 
       const itemsWithDiscount = items.filter(item => item.hasDiscount)
       const subtotal = session.amount_subtotal
+      const shipping = session.total_details?.amount_shipping || 0
       const total = session.amount_total
-
-      // Calculate shipping costs based on subtotal
-      let shipping = 0
-      if (subtotal < 10000) { // Less than €100
-        shipping = 495 // €4.95 shipping
-      }
 
       const customer_email = session.customer_details?.email || ""
       const customer_name = session.customer_details?.name || ""

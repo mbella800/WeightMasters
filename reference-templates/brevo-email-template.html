@@ -208,13 +208,12 @@
         <div class="product-details">
           <div class="product-info">
             <h3>{{ item.productName }}</h3>
-            <span class="quantity">{{ item.quantity }}x</span>
+            <span class="quantity">{{ item.quantity }}x €{{ item.productPrice }}</span>
           </div>
           <div class="product-price">
             <div class="price">€{{ item.totalPrice }}</div>
             {% if item.discountPercentage %}
             <div class="discount-price" style="font-size: 11px;">-{{ item.discountPercentage }}%</div>
-            <div class="savings" style="font-size: 11px;">€{{ item.totalSaved }}</div>
             {% endif %}
             <div class="btw-notice">Incl. BTW</div>
           </div>
