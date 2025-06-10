@@ -95,6 +95,10 @@ export default async function handler(req, res) {
   const sig = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+  console.log('🔍 Debug - Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('🔑 Debug - Webhook Secret exists:', !!webhookSecret);
+  console.log('📝 Debug - Signature:', sig);
+
   if (!webhookSecret) {
     console.error('❌ Missing STRIPE_WEBHOOK_SECRET environment variable');
     return res.status(500).json({ error: 'Webhook secret not configured' });
@@ -105,9 +109,11 @@ export default async function handler(req, res) {
     const chunks = [];
     for await (const chunk of req) {
       chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+      console.log('📦 Debug - Chunk type:', typeof chunk);
     }
     const rawBody = Buffer.concat(chunks);
-    console.log('📝 Raw body length:', rawBody.length);
+    console.log('📝 Debug - Raw body length:', rawBody.length);
+    console.log('🔍 Debug - Raw body preview:', rawBody.toString().substring(0, 100));
 
     // Construct and verify the event using the raw buffer
     const event = stripe.webhooks.constructEvent(
@@ -121,10 +127,12 @@ export default async function handler(req, res) {
 
     // Handle the event
     await sheetWebhook(event);
+    console.log('📊 Google Sheet updated successfully');
     
     res.status(200).json({ received: true });
   } catch (err) {
     console.error('❌ Error:', err.message);
+    console.error('Stack trace:', err.stack);
     res.status(400).json({ error: `Webhook Error: ${err.message}` });
   }
 } 

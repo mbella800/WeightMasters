@@ -221,8 +221,8 @@
       </div>
       {% endfor %}
 
-      <div class="shipping-notice {% if params.isFreeShipping %}free{% else %}paid{% endif %}">
-        {% if params.isFreeShipping %}
+      <div class="shipping-notice {% if params.shippingAmount == 0 %}free{% else %}paid{% endif %}">
+        {% if params.shippingAmount == 0 %}
           🎉 Gratis verzending
         {% else %}
           Verzendkosten (incl. BTW): €{{ params.shippingAmount }}
