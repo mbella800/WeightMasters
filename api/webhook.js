@@ -199,10 +199,25 @@ async function resetSheet(sheets) {
   }
 }
 
+const calculateShippingCost = (items) => {
+  // Calculate total weight
+  const totalWeight = items.reduce((total, item) => {
+    const weight = parseFloat(item.price?.product?.metadata?.weight || 0);
+    return total + (weight * item.quantity);
+  }, 0);
+
+  // Shipping cost calculation based on weight in grams
+  if (totalWeight <= 20) return 1.00; // €1,00 briefpost
+  if (totalWeight <= 50) return 2.00; // €2,00
+  if (totalWeight <= 500) return 4.10; // €4,10 brievenbuspakje
+  if (totalWeight <= 2000) return 6.95; // €6,95 standaard pakket
+  return 9.95; // €9,95 zwaar pakket (>2000g)
+};
+
 async function sheetWebhook(event) {
   try {
     const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
-      expand: ['line_items.data.price.product', 'customer']
+      expand: ['line_items.data.price.product']
     });
 
     const sheets = await getGoogleSheetClient();
@@ -245,46 +260,55 @@ async function sheetWebhook(event) {
       return Math.max(max, discountPercentage);
     }, 0);
 
-    const row = [
-      formatDate(new Date()),                    // Datum
-      session.payment_intent || session.id,       // Order ID
-      capitalizeWords(session.customer_details?.name || ""), // Naam
-      session.customer_details?.email || "",      // Email
-      session.customer_details?.phone || "",      // Telefoon
-      session.customer_details?.address?.country || "", // Land
-      session.customer_details?.address?.city || "", // Stad
-      session.customer_details?.address?.postal_code || "", // Postcode
-      `${session.customer_details?.address?.line1 || ""} ${session.customer_details?.address?.line2 || ""}`.trim(), // Adres
-      formatPrice(total),                         // Totaalbedrag
-      formatPrice(subtotal),                      // Subtotaal
-      formatPrice(shipping),                      // Verzendkosten
-      "21%",                                      // BTW
-      maxDiscount > 0 ? `${maxDiscount}%` : "",  // Korting %
-      "✅",                                       // Order verwerkt
-      "✅",                                       // Email verstuurd
-      session.payment_status,                     // Betaalstatus
-      "",                                         // Track & Trace
-      "postnl",                                  // Verzendmethode
-      formattedProducts,                         // Producten
-      formatPrice(total),                         // Totaal prijs
-      maxSavingsPerItem > 0 ? formatPrice(maxSavingsPerItem) : "", // Besparing per stuk
-      totalSavings > 0 ? formatPrice(totalSavings) : "" // Totale besparing
+    const customer_email = session.customer_details?.email || "";
+    const customer_name = session.customer_details?.name || "";
+    const shippingAmount = session.total_details?.amount_shipping || 0;
+
+    const lineItems = await stripe.checkout.sessions.listLineItems(
+      session.id,
+      { expand: ['data.price.product'] }
+    );
+
+    const items = lineItems.data.filter(item => !item.description?.toLowerCase().includes('verzend'));
+
+    // Add to Google Sheet
+    const values = [
+      [
+        new Date().toISOString(),
+        session.payment_intent,
+        customer_email,
+        customer_name,
+        items.map(item => `${item.quantity}x ${item.description}`).join(", "),
+        (session.amount_subtotal / 100).toFixed(2),
+        (shippingAmount / 100).toFixed(2),
+        (session.amount_total / 100).toFixed(2)
+      ]
     ];
 
-    // Append the order
-    await sheets.spreadsheets.values.append({
+    console.log('📝 Adding order to Google Sheet...');
+    console.log('Values to be added:', values);
+    console.log('Shipping amount from session:', (shippingAmount / 100).toFixed(2));
+
+    const result = await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.DEFAULT_SHEET_ID,
-      range: 'Bestellingen!A:W',
+      range: 'Bestellingen!A:H',
       valueInputOption: 'USER_ENTERED',
-      requestBody: {
-        values: [row]
-      }
+      resource: { values },
     });
 
-    return true;
+    console.log('✅ Order added to Google Sheet successfully');
+    return res.status(200).json({
+      received: true,
+      message: "Order processed successfully"
+    });
+
   } catch (error) {
-    console.error('Error in sheetWebhook:', error);
-    return false;
+    console.error('❌ Error processing order:', error);
+    return res.status(400).json({
+      error: {
+        message: error.message
+      }
+    });
   }
 }
 

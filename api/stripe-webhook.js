@@ -28,6 +28,21 @@ async function getRawBody(req) {
   return Buffer.concat(chunks)
 }
 
+const calculateShippingCost = (items) => {
+  // Calculate total weight
+  const totalWeight = items.reduce((total, item) => {
+    const weight = parseFloat(item.price?.product?.metadata?.weight || 0);
+    return total + (weight * item.quantity);
+  }, 0);
+
+  // Shipping cost calculation based on weight in grams
+  if (totalWeight <= 20) return 100; // €1,00 briefpost
+  if (totalWeight <= 50) return 200; // €2,00
+  if (totalWeight <= 500) return 410; // €4,10 brievenbuspakje
+  if (totalWeight <= 2000) return 695; // €6,95 standaard pakket
+  return 995; // €9,95 zwaar pakket (>2000g)
+};
+
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).send("Method Not Allowed")
@@ -88,7 +103,7 @@ module.exports = async function handler(req, res) {
 
       const itemsWithDiscount = items.filter(item => item.hasDiscount)
       const subtotal = session.amount_subtotal
-      const shipping = session.total_details?.amount_shipping || 0
+      const shippingAmount = session.total_details?.amount_shipping || 0
       const total = session.amount_total
 
       const customer_email = session.customer_details?.email || ""
@@ -114,7 +129,7 @@ module.exports = async function handler(req, res) {
             email: customer_email,
             orderId: session.payment_intent,
             subtotal: (subtotal / 100).toFixed(2),
-            shipping: (shipping / 100).toFixed(2),
+            shipping: (shippingAmount / 100).toFixed(2),
             tax: "0.00",
             total: (total / 100).toFixed(2),
             shopName: "Weightmasters",
@@ -140,9 +155,9 @@ module.exports = async function handler(req, res) {
             })),
             totalSaved: itemsWithDiscount.reduce((sum, item) => 
               sum + (parseFloat(item.itemSavings) * item.quantity), 0).toFixed(2),
-            shippingInfo: shipping === 0 ? 
+            shippingInfo: shippingAmount === 0 ? 
               "🎉 Gratis verzending" : 
-              `Verzendkosten (incl. BTW): €${(shipping / 100).toFixed(2)}`
+              `Verzendkosten (incl. BTW): €${(shippingAmount / 100).toFixed(2)}`
           }
         }
 
