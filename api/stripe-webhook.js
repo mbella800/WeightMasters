@@ -1,151 +1,191 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const SibApiV3Sdk = require('sib-api-v3-sdk');
+const { buffer } = require('micro');
 
 // Disable body parsing, we need the raw body for signature verification
-const config = {
+export const config = {
   api: {
     bodyParser: false,
   },
 };
 
-async function buffer(readable) {
-  const chunks = [];
-  for await (const chunk of readable) {
-    chunks.push(
-      typeof chunk === 'string' ? Buffer.from(chunk) : chunk
-    );
-  }
-  return Buffer.concat(chunks);
+// Initialize Brevo API client
+const defaultClient = SibApiV3Sdk.ApiClient.instance;
+const apiKey = defaultClient.authentications['api-key'];
+apiKey.apiKey = process.env.BREVO_API_KEY;
+const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
+
+function capitalizeWords(str) {
+  if (!str) return "";
+  return str.toLowerCase().split(' ').map(word => 
+    word.charAt(0).toUpperCase() + word.slice(1)
+  ).join(' ');
 }
 
 async function sendOrderConfirmationEmail(session) {
   try {
+    console.log('📧 Sending order confirmation email...');
+    
+    const customer_email = session.customer_details?.email;
+    if (!customer_email) {
+      throw new Error('No customer email found in session');
+    }
+
+    const customer_name = session.customer_details?.name || "";
+
     const lineItems = await stripe.checkout.sessions.listLineItems(
       session.id,
       { expand: ['data.price.product'] }
     );
 
-    // Format items for email template
     const items = lineItems.data
       .filter(item => !item.description?.toLowerCase().includes('verzend'))
       .map(item => {
-        const metadata = item.price?.product?.metadata || {};
         const productName = item.description?.replace(/🎉.*$/, "").trim() || "";
         const productImage = item.price?.product?.images?.[0] || "";
         const currentPrice = item.price.unit_amount / 100;
-        const originalPrice = metadata.originalPrice ? parseFloat(metadata.originalPrice) : currentPrice;
+        
+        // Get the original price from the product metadata
+        const metadata = item.price?.product?.metadata || {};
+        const originalPrice = metadata.originalPrice ? 
+          parseFloat(metadata.originalPrice) : 
+          parseFloat(metadata.Product_Price || currentPrice);
+        
         const hasDiscount = originalPrice > currentPrice;
-        const quantity = item.quantity || 1;
+        const discountPercentage = hasDiscount ? 
+          Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : 0;
 
         return {
           productName,
           productImage,
-          quantity,
-          productPrice: currentPrice.toFixed(2),
-          totalPrice: (currentPrice * quantity).toFixed(2),
-          discountPercentage: hasDiscount ? Math.round(((originalPrice - currentPrice) / originalPrice) * 100) : null
+          productPrice: currentPrice.toFixed(2).replace('.', ','),
+          originalPrice: originalPrice.toFixed(2).replace('.', ','),
+          hasDiscount,
+          discountPercentage,
+          itemSavings: hasDiscount ? (originalPrice - currentPrice).toFixed(2).replace('.', ',') : "0,00",
+          quantity: item.quantity,
+          totalPrice: (currentPrice * item.quantity).toFixed(2).replace('.', ','),
+          totalOriginalPrice: (originalPrice * item.quantity).toFixed(2).replace('.', ',')
         };
       });
 
-    // Calculate totals
-    const subtotal = session.amount_subtotal / 100;
-    const shippingAmount = session.total_details?.amount_shipping / 100 || 0;
-    const total = session.amount_total / 100;
+    const itemsWithDiscount = items.filter(item => item.hasDiscount);
+    const subtotal = session.amount_subtotal;
+    const shippingFee = session.total_details?.amount_shipping || 0;
+    const total = session.amount_total;
 
-    // Format discount items if any discounts exist
-    const discountItems = items
-      .filter(item => item.discountPercentage)
-      .map(item => ({
-        productName: item.productName,
-        originalPrice: ((item.productPrice * 100) / (100 - item.discountPercentage)).toFixed(2),
-        newPrice: item.productPrice,
-        discountPercentage: item.discountPercentage,
-        quantity: item.quantity,
-        totalSaved: (((item.productPrice * 100) / (100 - item.discountPercentage) - item.productPrice) * item.quantity).toFixed(2)
-      }));
+    console.log('💰 Order details:', {
+      subtotal: (subtotal / 100).toFixed(2),
+      shippingFee: (shippingFee / 100).toFixed(2),
+      total: (total / 100).toFixed(2)
+    });
 
-    const totalSaved = discountItems.reduce((sum, item) => sum + parseFloat(item.totalSaved), 0).toFixed(2);
+    // Check if shipping is free based on the actual shipping amount from Stripe
+    const isFreeShipping = shippingFee === 0;
+    const shippingCost = (shippingFee / 100).toFixed(2).replace('.', ',');
+    
+    // Only show free shipping text if shipping amount is actually 0
+    const shippingInfo = isFreeShipping ? 
+      "🎉 Gratis verzending" : 
+      `Verzendkosten (incl. BTW): €${shippingCost}`;
 
-    // Configure Brevo
-    const defaultClient = SibApiV3Sdk.ApiClient.instance;
-    const apiKey = defaultClient.authentications['api-key'];
-    apiKey.apiKey = process.env.BREVO_API_KEY;
+    console.log('📦 Shipping info:', { 
+      isFreeShipping, 
+      shippingFee, 
+      shippingCost,
+      shippingInfo 
+    });
 
-    const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
-    const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail();
-
-    // Prepare email data
-    sendSmtpEmail.templateId = parseInt(process.env.BREVO_TEMPLATE_ID);
-    sendSmtpEmail.to = [{
-      email: session.customer_details.email,
-      name: session.customer_details.name
-    }];
-    sendSmtpEmail.params = {
-      name: session.customer_details.name,
-      orderId: session.metadata.orderId,
-      items,
-      subtotal: subtotal.toFixed(2),
-      shippingAmount: shippingAmount.toFixed(2),
-      total: total.toFixed(2),
-      hasDiscount: discountItems.length > 0,
-      discountItems,
-      totalSaved
+    const emailPayload = {
+      sender: {
+        name: "Weightmasters",
+        email: process.env.BREVO_FROM_EMAIL || "mailweightmasters@gmail.com"
+      },
+      to: [{
+        email: customer_email,
+        name: customer_name || "Klant"
+      }],
+      templateId: parseInt(process.env.BREVO_TEMPLATE_ID),
+      params: {
+        name: capitalizeWords(customer_name) || "Klant",
+        email: customer_email,
+        orderId: session.payment_intent,
+        subtotal: (subtotal / 100).toFixed(2).replace('.', ','),
+        shipping: shippingCost,
+        tax: "0,00",
+        total: (total / 100).toFixed(2).replace('.', ','),
+        shopName: "Weightmasters",
+        items: items.map(item => ({
+          productName: item.productName.replace(' (incl. BTW)', ''),
+          productImage: item.productImage,
+          productPrice: item.productPrice,
+          quantity: item.quantity,
+          originalPrice: item.hasDiscount ? item.originalPrice : null,
+          discountPercentage: item.hasDiscount ? item.discountPercentage : null,
+          totalPrice: item.totalPrice,
+          totalOriginalPrice: item.hasDiscount ? item.totalOriginalPrice : null
+        })),
+        hasDiscount: itemsWithDiscount.length > 0,
+        discountItems: itemsWithDiscount.map(item => ({
+          productName: item.productName.replace(' (incl. BTW)', ''),
+          originalPrice: item.originalPrice,
+          newPrice: item.productPrice,
+          savedAmount: item.itemSavings,
+          discountPercentage: item.discountPercentage,
+          quantity: item.quantity,
+          totalSaved: (parseFloat(item.itemSavings.replace(',', '.')) * item.quantity).toFixed(2).replace('.', ',')
+        })),
+        totalSaved: itemsWithDiscount.reduce((sum, item) => 
+          sum + (parseFloat(item.itemSavings.replace(',', '.')) * item.quantity), 0).toFixed(2).replace('.', ','),
+        shippingInfo: shippingInfo,
+        isFreeShipping: isFreeShipping
+      }
     };
 
-    // Send the email
-    const result = await apiInstance.sendTransacEmail(sendSmtpEmail);
-    console.log('✅ Order confirmation email sent:', result);
+    await apiInstance.sendTransacEmail(emailPayload);
+    console.log('✅ Order confirmation email sent successfully');
     return true;
   } catch (error) {
-    console.error('❌ Error sending order confirmation email:', error);
+    console.error('❌ Error sending email:', error);
     throw error;
   }
 }
 
-async function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).end('Method Not Allowed');
   }
 
-  const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-  console.log('🔍 Debug - Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('🔑 Debug - Webhook Secret exists:', !!webhookSecret);
-  console.log('📝 Debug - Signature:', sig);
-
-  if (!webhookSecret) {
-    console.error('❌ Missing STRIPE_WEBHOOK_SECRET environment variable');
-    return res.status(500).json({ error: 'Webhook secret not configured' });
-  }
-
   try {
+    // Get the raw body as a buffer
     const rawBody = await buffer(req);
+    const sig = req.headers['stripe-signature'];
+
+    console.log('🔍 Debug - Headers:', req.headers);
+    console.log('🔑 Debug - Webhook Secret exists:', !!process.env.STRIPE_WEBHOOK_SECRET);
+    console.log('📝 Debug - Signature:', sig);
     console.log('📝 Debug - Raw body length:', rawBody.length);
-    console.log('🔍 Debug - Raw body preview:', rawBody.toString().substring(0, 100));
+    console.log('🔍 Debug - Raw body preview:', rawBody.toString().substring(0, 200));
+    console.log('🔑 Debug - Webhook secret length:', process.env.STRIPE_WEBHOOK_SECRET?.length);
+    console.log('🔑 Debug - Webhook secret preview:', process.env.STRIPE_WEBHOOK_SECRET ? `whsec...` : 'undefined');
 
-    // Log the exact webhook secret being used
-    console.log('🔑 Debug - Webhook secret length:', webhookSecret.length);
-    console.log('🔑 Debug - Webhook secret preview:', webhookSecret.substring(0, 5) + '...');
+    const event = stripe.webhooks.constructEvent(
+      rawBody,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
 
-    const event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
-
-    console.log('✅ Success: Webhook signature verified');
     console.log('Event type:', event.type);
 
     if (event.type === 'checkout.session.completed') {
       const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
         expand: ['line_items.data.price.product']
       });
-      console.log('💳 Processing checkout session:', session.id);
-      
-      // Send order confirmation email
+
       await sendOrderConfirmationEmail(session);
-      
-      res.status(200).json({ received: true });
+      res.json({ received: true });
     } else {
-      console.log('⚠️ Unhandled event type:', event.type);
       res.status(400).json({
         error: {
           message: 'Unhandled event type'
@@ -153,11 +193,12 @@ async function handler(req, res) {
       });
     }
   } catch (err) {
-    console.error('❌ Error:', err.message);
+    console.error('❌ Webhook error:', err.message);
     console.error('Stack trace:', err.stack);
-    res.status(400).json({ error: `Webhook Error: ${err.message}` });
+    res.status(400).json({
+      error: {
+        message: err.message
+      }
+    });
   }
 }
-
-module.exports = handler;
-module.exports.config = config;
