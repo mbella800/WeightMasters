@@ -43,6 +43,7 @@ async function updateGoogleSheet(session) {
 
     const shippingFee = session.total_details?.amount_shipping || 0;
     const shippingFeeStr = (shippingFee / 100).toFixed(2).replace('.', ',');
+    console.log('📦 SHIPPING DEBUG SHEET-WEBHOOK:', { shippingFee, shippingFeeStr });
 
     const orderData = {
       'Order ID': session.payment_intent,

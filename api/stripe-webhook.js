@@ -69,10 +69,9 @@ async function sendOrderConfirmationEmail(session) {
     const itemsWithDiscount = items.filter(item => item.hasDiscount);
     const subtotal = session.amount_subtotal;
     const shippingFee = session.total_details?.amount_shipping || 0;
-    const total = session.amount_total;
-
-    // shippingFee altijd als string met 2 decimalen en komma
     const shippingFeeStr = (shippingFee / 100).toFixed(2).replace('.', ',');
+    console.log('📦 SHIPPING DEBUG STRIPE-WEBHOOK:', { shippingFee, shippingFeeStr });
+    const total = session.amount_total;
 
     const emailPayload = {
       sender: {

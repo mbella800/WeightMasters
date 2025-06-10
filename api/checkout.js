@@ -128,6 +128,13 @@ module.exports = async (req, res) => {
       else shippingFee = 995 // €9,95
     }
 
+    console.log('🚚 SHIPPING DEBUG:', {
+      subtotalBeforeTax,
+      totalWeight,
+      freeShippingThreshold,
+      shippingFee: shippingFee / 100
+    });
+
     // Verzendkosten toevoegen
     if (shippingFee > 0) {
       line_items.push({

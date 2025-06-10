@@ -2,10 +2,14 @@
   "name": "weightmasters",
   "version": "1.0.0",
   "description": "Weight Masters webshop",
+  "engines": {
+    "node": "18.x"
+  },
   "dependencies": {
-    "stripe": "^14.0.0",
+    "google-spreadsheet": "^3.3.0",
     "googleapis": "^129.0.0",
     "micro": "^10.0.1",
-    "sib-api-v3-sdk": "^8.5.0"
+    "sib-api-v3-sdk": "^8.5.0",
+    "stripe": "^14.0.0"
   }
 }
