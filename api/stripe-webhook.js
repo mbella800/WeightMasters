@@ -1,6 +1,5 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const SibApiV3Sdk = require('sib-api-v3-sdk');
-const { buffer } = require('micro');
 
 // Disable body parsing, we need the raw body for signature verification
 export const config = {
@@ -106,7 +105,7 @@ async function sendOrderConfirmationEmail(session) {
         email: customer_email,
         orderId: session.payment_intent,
         subtotal: (subtotal / 100).toFixed(2).replace('.', ','),
-        shipping: shippingCost,
+        shippingAmount: shippingCost,
         tax: "0,00",
         total: (total / 100).toFixed(2).replace('.', ','),
         shopName: "Weightmasters",
@@ -152,15 +151,32 @@ export default async function handler(req, res) {
     return res.status(405).end('Method Not Allowed');
   }
 
-  const rawBody = await buffer(req);
   const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (!webhookSecret) {
+    console.error('❌ Missing STRIPE_WEBHOOK_SECRET environment variable');
+    return res.status(500).json({ error: 'Webhook secret not configured' });
+  }
 
   try {
+    // Get the raw request body as a string
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const rawBody = Buffer.concat(chunks).toString('utf8');
+    console.log('📝 Raw body length:', rawBody.length);
+
+    // Construct and verify the event using the raw string
     const event = stripe.webhooks.constructEvent(
       rawBody,
       sig,
-      process.env.STRIPE_WEBHOOK_SECRET
+      webhookSecret
     );
+
+    console.log('✅ Success: Webhook signature verified');
+    console.log('Event type:', event.type);
 
     if (event.type === 'checkout.session.completed') {
       const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
@@ -168,7 +184,7 @@ export default async function handler(req, res) {
       });
 
       await sendOrderConfirmationEmail(session);
-      res.json({ received: true });
+      res.status(200).json({ received: true });
     } else {
       res.status(400).json({
         error: {
@@ -177,11 +193,7 @@ export default async function handler(req, res) {
       });
     }
   } catch (err) {
-    console.error('❌ Webhook error:', err.message);
-    res.status(400).json({
-      error: {
-        message: err.message
-      }
-    });
+    console.error('❌ Error:', err.message);
+    res.status(400).json({ error: `Webhook Error: ${err.message}` });
   }
 }
