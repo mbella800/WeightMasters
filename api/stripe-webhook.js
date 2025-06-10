@@ -19,14 +19,13 @@ function capitalizeWords(str) {
   return str.replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
-// ✅ VERCEL-SPECIFIEKE RAW BODY READER
-function getRawBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = []
-    req.on('data', (chunk) => chunks.push(chunk))
-    req.on('end', () => resolve(Buffer.concat(chunks)))
-    req.on('error', reject)
-  })
+// Hulpfunctie om raw body te lezen
+async function getRawBody(req) {
+  const chunks = []
+  for await (const chunk of req) {
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks)
 }
 
 module.exports = async function handler(req, res) {
@@ -104,7 +103,7 @@ module.exports = async function handler(req, res) {
           }],
           templateId: process.env.BREVO_TEMPLATE_ID,
           params: {
-            name: customer_name || "Klant",
+            name: capitalizeWords(customer_name) || "Klant",
             email: customer_email,
             orderId: session.payment_intent,
             subtotal: subtotal.toFixed(2),
@@ -113,7 +112,7 @@ module.exports = async function handler(req, res) {
             total: total.toFixed(2),
             shopName: "Weightmasters",
             items: items.map(item => ({
-              productName: `${item.productName} (incl. BTW)`,
+              productName: item.productName.replace(' (incl. BTW)', ''),
               productImage: item.productImage,
               productPrice: item.productPrice,
               quantity: item.quantity,
@@ -124,7 +123,7 @@ module.exports = async function handler(req, res) {
             })),
             hasDiscount: itemsWithDiscount.length > 0,
             discountItems: itemsWithDiscount.map(item => ({
-              productName: `${item.productName} (incl. BTW)`,
+              productName: item.productName.replace(' (incl. BTW)', ''),
               originalPrice: item.originalPrice,
               newPrice: item.productPrice,
               savedAmount: item.itemSavings,

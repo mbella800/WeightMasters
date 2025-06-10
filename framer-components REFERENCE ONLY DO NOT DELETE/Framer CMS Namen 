@@ -1,0 +1,12 @@
+"CMS NAAM" < uitleg
+
+"Product Name" < Beschrijving: Naam van Product
+"stripeProductId" < Beschrijving: Stripe Product ID LETTERLIJK
+"price" < Beschrijving: Stripe Price ID
+"checkoutSlug" < Beschrijving: Project Name
+"Product Price" < Beschrijving: Prijs van het product
+"Sale Price Optioneel" < Beschrijving: Prijs met korting
+"Weight (g)" < Beschrijving: Gewicht product
+"FreeShippingTreshold" < Beschrijving: Bedrag vanaf wanneer verzending gratis is
+"Coupon ID" < Beschrijving: Identifier bij aangemaakte kortingen in Stripe (deze moet ook overal in geintegreerd zijn)
+"Product Image " < Beschrijving: Main Product Image
