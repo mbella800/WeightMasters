@@ -1,174 +1,52 @@
-import { google } from 'googleapis';
-import stripePkg from 'stripe';
-const stripe = stripePkg(process.env.STRIPE_SECRET_KEY);
+const { GoogleSpreadsheet } = require('google-spreadsheet');
 
-async function getGoogleSheetClient() {
-  try {
-    let credentials;
-    const serviceKey = process.env.GOOGLE_SERVICE_KEY;
-    
-    if (!serviceKey) {
-      throw new Error("Missing GOOGLE_SERVICE_KEY");
-    }
-
-    try {
-      // Parse the service key
-      credentials = JSON.parse(serviceKey);
-      
-      // Convert the private key to a proper format
-      if (credentials.private_key) {
-        credentials.private_key = credentials.private_key
-          .replace(/\\n/g, '\n')
-          .replace(/\"/, '"');
-      }
-    } catch (e) {
-      console.error("Failed to parse GOOGLE_SERVICE_KEY:", e);
-      throw new Error("Invalid GOOGLE_SERVICE_KEY format");
-    }
-
-    const auth = new google.auth.GoogleAuth({
-      credentials,
-      scopes: ['https://www.googleapis.com/auth/spreadsheets']
-    });
-
-    return google.sheets({ version: 'v4', auth });
-  } catch (error) {
-    console.error("❌ Google Sheets Auth Error:", error);
-    throw error;
-  }
-}
-
-async function initializeSheet(sheets) {
-  const headers = [
-    'Order ID',
-    'Date',
-    'Customer Name',
-    'Email',
-    'Phone',
-    'Country',
-    'City',
-    'Postal Code',
-    'Address',
-    'Original Amount',
-    'Paid Amount',
-    'Discount',
-    'Discount %',
-    'Products',
-    'Subtotal',
-    'Shipping',
-    'Total',
-    'Trackingslink'
-  ]
-
-  try {
-    console.log("🔍 Using sheet ID:", process.env.DEFAULT_SHEET_ID);
-    
-    // First get the spreadsheet metadata to get the correct sheet ID
-    const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: process.env.DEFAULT_SHEET_ID
-    });
-    
-    const sheet = spreadsheet.data.sheets[0];
-    const sheetId = sheet.properties.sheetId;
-    console.log("📊 Found sheet ID:", sheetId);
-
-    // Clear all content except headers
-    console.log("🗑️ Clearing sheet content...");
-    await sheets.spreadsheets.values.clear({
-      spreadsheetId: process.env.DEFAULT_SHEET_ID,
-      range: 'Bestellingen!A2:Q',
-    });
-    console.log("✅ Sheet content cleared");
-
-    // Set headers
-    console.log("📝 Setting headers...");
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: process.env.DEFAULT_SHEET_ID,
-      range: 'Bestellingen!A1',
-      valueInputOption: 'USER_ENTERED',
-      requestBody: {
-        values: [headers]
-      }
-    });
-    console.log("✅ Headers set");
-
-    // Format headers
-    console.log("🎨 Formatting headers...");
-      await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: process.env.DEFAULT_SHEET_ID,
-        requestBody: {
-          requests: [
-            {
-            repeatCell: {
-              range: {
-                sheetId: sheetId,
-                startRowIndex: 0,
-                endRowIndex: 1,
-                startColumnIndex: 0,
-                endColumnIndex: headers.length
-              },
-              cell: {
-                userEnteredFormat: {
-                  textFormat: { bold: true },
-                  backgroundColor: {
-                    red: 0.9,
-                    green: 0.9,
-                    blue: 0.9
-                  }
-                }
-              },
-              fields: 'userEnteredFormat(textFormat,backgroundColor)'
-            }
-          },
-          {
-            updateSheetProperties: {
-              properties: {
-                sheetId: sheetId,
-                gridProperties: {
-                  frozenRowCount: 1
-                }
-              },
-              fields: 'gridProperties.frozenRowCount'
-            }
-          }
-        ]
-      }
-    });
-    console.log("✅ Headers formatted");
-
-    console.log("✅ Sheet reset successful");
-    return true;
-  } catch (error) {
-    console.error('❌ Error resetting sheet:', error);
-    throw error;
-  }
-}
+const headers = [
+  'Order ID',
+  'Date',
+  'Customer Name',
+  'Email',
+  'Phone',
+  'Country',
+  'City',
+  'Postal Code',
+  'Address',
+  'Original Amount',
+  'Paid Amount',
+  'Discount',
+  'Discount %',
+  'Products',
+  'Subtotal',
+  'Shipping',
+  'Total',
+  'Trackingslink'
+];
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    res.setHeader('Allow', 'POST')
-    res.status(405).end('Method Not Allowed')
-    return
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).end('Method Not Allowed');
   }
 
   try {
-    console.log("🔑 Getting Google Sheets client...");
-    const sheets = await getGoogleSheetClient();
-    console.log("✅ Got Google Sheets client");
-    
-    console.log("🔄 Initializing sheet...");
-    await initializeSheet(sheets);
-    console.log("✅ Sheet initialized");
-    
-    res.status(200).json({ 
-      success: true, 
-      message: "Sheet reset successful",
+    const doc = new GoogleSpreadsheet(process.env.DEFAULT_SHEET_ID);
+    const credentials = JSON.parse(process.env.GOOGLE_SERVICE_KEY);
+    await doc.useServiceAccountAuth(credentials);
+    await doc.loadInfo();
+    const sheet = doc.sheetsByIndex[0];
+
+    // Clear all rows except header
+    await sheet.clear();
+    await sheet.setHeaderRow(headers);
+
+    res.status(200).json({
+      success: true,
+      message: 'Sheet reset successful',
       sheetId: process.env.DEFAULT_SHEET_ID
     });
   } catch (error) {
-    console.error("❌ Error:", error);
-    res.status(500).json({ 
-      success: false, 
+    console.error('❌ Error resetting sheet:', error);
+    res.status(500).json({
+      success: false,
       error: error.message,
       stack: error.stack
     });
