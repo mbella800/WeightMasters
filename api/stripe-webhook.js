@@ -1,11 +1,13 @@
-import { headers } from 'next/headers';
-import { NextResponse } from 'next/server';
-import Stripe from 'stripe';
-import SibApiV3Sdk from 'sib-api-v3-sdk';
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const SibApiV3Sdk = require('sib-api-v3-sdk');
+const { buffer } = require('micro');
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: '2022-11-15',
-});
+// Disable body parsing, we need the raw body for signature verification
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
 
 // Initialize Brevo API client
 const defaultClient = SibApiV3Sdk.ApiClient.instance;
@@ -144,23 +146,28 @@ async function sendOrderConfirmationEmail(session) {
   }
 }
 
-export async function POST(request) {
-  const headersList = headers();
-  const signature = headersList.get('stripe-signature');
-  
-  try {
-    // Get raw body as text
-    const rawBody = await request.text();
-    
-    // Construct and verify the event
-    const event = stripe.webhooks.constructEvent(
-      rawBody,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).end('Method Not Allowed');
+  }
 
-    console.log('✅ Success: Email webhook signature verified');
-    console.log('Event type:', event.type);
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (!webhookSecret) {
+    console.error('❌ Missing STRIPE_WEBHOOK_SECRET environment variable');
+    return res.status(500).json({ error: 'Webhook secret not configured' });
+  }
+
+  try {
+    // Get the raw body using micro's buffer function
+    const rawBody = await buffer(req);
+    console.log('📝 Raw body length:', rawBody.length);
+    
+    // Pass the raw buffer to constructEvent
+    const event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
+    console.log('✅ Email webhook signature verified');
 
     if (event.type === 'checkout.session.completed') {
       const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
@@ -168,18 +175,20 @@ export async function POST(request) {
       });
 
       await sendOrderConfirmationEmail(session);
-      return NextResponse.json({ received: true });
+      res.status(200).json({ received: true });
     } else {
-      return NextResponse.json(
-        { error: 'Unhandled event type' },
-        { status: 400 }
-      );
+      res.status(400).json({
+        error: {
+          message: 'Unhandled event type'
+        }
+      });
     }
   } catch (err) {
     console.error('❌ Webhook error:', err.message);
-    return NextResponse.json(
-      { error: `Webhook Error: ${err.message}` },
-      { status: 400 }
-    );
+    res.status(400).json({
+      error: {
+        message: err.message
+      }
+    });
   }
 }
