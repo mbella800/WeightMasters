@@ -47,23 +47,53 @@ async function updateGoogleSheet(session) {
     const shippingFeeStr = (shippingFee / 100).toFixed(2).replace('.', ',');
     console.log('📦 SHIPPING DEBUG SHEET-WEBHOOK (line item):', { shippingFee, shippingFeeStr });
 
+    // Bereken originele bedrag, betaald bedrag, korting en korting percentage
+    let originalTotal = 0;
+    let paidTotal = 0;
+    let totalDiscount = 0;
+    let discountPercentage = 0;
+    lineItems.data.forEach(item => {
+      const quantity = item.quantity || 1;
+      const original = item.price?.product?.metadata?.originalPrice ? parseFloat(item.price.product.metadata.originalPrice) : (item.price.unit_amount / 100);
+      const paid = item.price.unit_amount / 100;
+      originalTotal += original * quantity;
+      paidTotal += paid * quantity;
+    });
+    totalDiscount = originalTotal - paidTotal;
+    discountPercentage = originalTotal > 0 ? Math.round((totalDiscount / originalTotal) * 100) : 0;
+
     const orderData = {
       'Order ID': session.payment_intent,
       'Date': new Date().toLocaleString('nl-NL', { timeZone: 'Europe/Amsterdam' }),
       'Customer Name': customer.name || '',
       'Email': customer.email || '',
-      'Address': `${customer.address?.line1 || ''} ${customer.address?.line2 || ''}`,
+      'Phone': customer.phone || '',
+      'Country': customer.address?.country || '',
       'City': customer.address?.city || '',
       'Postal Code': customer.address?.postal_code || '',
-      'Country': customer.address?.country || '',
+      'Address': `${customer.address?.line1 || ''} ${customer.address?.line2 || ''}`,
+      'Original Amount': originalTotal.toFixed(2).replace('.', ','),
+      'Paid Amount': paidTotal.toFixed(2).replace('.', ','),
+      'Discount': totalDiscount > 0 ? totalDiscount.toFixed(2).replace('.', ',') : '',
+      'Discount %': totalDiscount > 0 ? discountPercentage + '%' : '',
       'Products': items.map(item => `${item.name} (${item.quantity}x €${item.price})`).join(', '),
       'Subtotal': (session.amount_subtotal / 100).toFixed(2).replace('.', ','),
       'Shipping': shippingFeeStr,
-      'Total': (session.amount_total / 100).toFixed(2).replace('.', ',')
+      'Total': (session.amount_total / 100).toFixed(2).replace('.', ','),
+      'Trackingslink': '' // Leeg, kan later ingevuld worden
     };
 
-    await sheet.addRow(orderData);
-    console.log('✅ Order added to Google Sheet');
+    console.log('📝 ORDERDATA SHEET:', orderData);
+
+    // Haal kolomnamen uit de sheet
+    await sheet.loadHeaderRow();
+    const headers = sheet.headerValues;
+
+    // Maak een array van waarden in de juiste volgorde
+    const row = headers.map(header => orderData[header] || '');
+
+    await sheet.addRow(row);
+    console.log('✅ Order added to Google Sheet (flexibele kolomvolgorde)');
     return true;
   } catch (error) {
     console.error('❌ Error updating Google Sheet:', error);
