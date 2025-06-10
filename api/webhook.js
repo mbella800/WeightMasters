@@ -10,7 +10,7 @@ export const config = {
 };
 
 // Zet hier de URL van je Cloud Function
-const CLOUD_FUNCTION_URL = 'https://europe-west1-weightmasters.cloudfunctions.net/logOrderToSheet';
+const CLOUD_FUNCTION_URL = 'https://logordertosheet-351445746762.europe-west1.run.app';
 
 function buildOrderData(session, lineItems) {
   const customer = session.customer_details;
