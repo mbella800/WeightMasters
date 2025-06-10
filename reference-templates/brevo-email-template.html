@@ -221,8 +221,12 @@
       </div>
       {% endfor %}
 
-      <div class="shipping-notice {% if params.shipping == '0.00' %}free{% else %}paid{% endif %}">
-        {{ params.shippingInfo }}
+      <div class="shipping-notice {% if params.isFreeShipping %}free{% else %}paid{% endif %}">
+        {% if params.isFreeShipping %}
+          🎉 Gratis verzending
+        {% else %}
+          Verzendkosten (incl. BTW): €{{ params.shippingAmount }}
+        {% endif %}
       </div>
 
       {% if params.hasDiscount %}
@@ -249,7 +253,7 @@
         </div>
         <div class="total-row">
           <span>Verzendkosten (incl. BTW)</span>
-          <span class="price">€{{ params.shipping }}</span>
+          <span class="price">€{{ params.shippingAmount }}</span>
         </div>
         <div class="total-row final">
           <span>Totaal (incl. BTW)</span>
