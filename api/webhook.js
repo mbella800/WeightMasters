@@ -2,12 +2,6 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const { google } = require('googleapis')
 const { buffer } = require('micro')
 
-// Webhook secret voor sheet notifications
-const WEBHOOK_SECRET_SHEET = process.env.STRIPE_WEBHOOK_SECRET_SHEET
-if (!WEBHOOK_SECRET_SHEET) {
-  console.error("❌ Missing STRIPE_WEBHOOK_SECRET_SHEET environment variable")
-}
-
 // Disable body parsing, we need the raw body for signature verification
 export const config = {
   api: {
@@ -16,10 +10,17 @@ export const config = {
 }
 
 // Initialize auth
-const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS),
-  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-})
+let auth;
+try {
+  const credentials = JSON.parse(process.env.GOOGLE_SERVICE_KEY);
+  auth = new google.auth.GoogleAuth({
+    credentials,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+} catch (error) {
+  console.error('❌ Error parsing Google credentials:', error);
+  throw new Error('Invalid Google credentials configuration');
+}
 
 async function getGoogleSheetClient() {
   try {
@@ -288,6 +289,11 @@ export default async function handler(req, res) {
 
   const sig = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (!webhookSecret) {
+    console.error('❌ Missing STRIPE_WEBHOOK_SECRET environment variable');
+    return res.status(500).json({ error: 'Webhook secret not configured' });
+  }
 
   try {
     const buf = await buffer(req);

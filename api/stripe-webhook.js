@@ -9,16 +9,11 @@ export const config = {
   },
 };
 
+// Initialize Brevo API client
 const defaultClient = SibApiV3Sdk.ApiClient.instance;
 const apiKey = defaultClient.authentications['api-key'];
 apiKey.apiKey = process.env.BREVO_API_KEY;
 const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
-
-// Webhook secret voor email notifications
-const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET
-if (!WEBHOOK_SECRET) {
-  console.error("❌ Missing STRIPE_WEBHOOK_SECRET environment variable")
-}
 
 function capitalizeWords(str) {
   if (!str) return "";
@@ -56,6 +51,10 @@ async function sendOrderConfirmationEmail(session) {
     console.log('📧 Sending order confirmation email...');
 
     const customer_email = session.customer_details?.email;
+    if (!customer_email) {
+      throw new Error('No customer email found in session');
+    }
+
     const customer_name = session.customer_details?.name || "";
 
     const lineItems = await stripe.checkout.sessions.listLineItems(
@@ -106,7 +105,7 @@ async function sendOrderConfirmationEmail(session) {
     const emailPayload = {
       sender: {
         name: "Weightmasters",
-        email: "mailweightmasters@gmail.com"
+        email: process.env.BREVO_FROM_EMAIL || "mailweightmasters@gmail.com"
       },
       to: [{
         email: customer_email,
@@ -167,6 +166,11 @@ export default async function handler(req, res) {
 
   const sig = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET_EMAIL;
+
+  if (!webhookSecret) {
+    console.error('❌ Missing STRIPE_WEBHOOK_SECRET_EMAIL environment variable');
+    return res.status(500).json({ error: 'Webhook secret not configured' });
+  }
 
   try {
     const buf = await buffer(req);
