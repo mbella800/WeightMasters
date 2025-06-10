@@ -73,35 +73,22 @@ export default async function handler(req, res) {
     return res.status(405).end('Method Not Allowed');
   }
 
+  const rawBody = await buffer(req);
   const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-  if (!webhookSecret) {
-    console.error('❌ Missing STRIPE_WEBHOOK_SECRET environment variable');
-    return res.status(500).json({ error: 'Webhook secret not configured' });
-  }
 
   try {
-    // Get the raw body as a buffer
-    const rawBody = await buffer(req);
-    console.log('📝 Raw body length:', rawBody.length);
-
-    // Construct and verify the event using the raw buffer
     const event = stripe.webhooks.constructEvent(
       rawBody,
       sig,
-      webhookSecret
+      process.env.STRIPE_WEBHOOK_SECRET
     );
-
-    console.log('✅ Success: Webhook signature verified');
-    console.log('Event type:', event.type);
 
     // Handle the event
     await sheetWebhook(event);
-
-    res.status(200).json({ received: true });
+    
+    res.json({ received: true });
   } catch (err) {
-    console.error('❌ Error:', err.message);
-    res.status(400).json({ error: `Webhook Error: ${err.message}` });
+    console.error('❌ Webhook error:', err.message);
+    res.status(400).json({ error: err.message });
   }
 } 
