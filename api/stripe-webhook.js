@@ -31,21 +31,6 @@ async function getRawBody(req) {
   return Buffer.concat(chunks)
 }
 
-const calculateShippingCost = (items) => {
-  // Calculate total weight
-  const totalWeight = items.reduce((total, item) => {
-    const weight = parseFloat(item.price?.product?.metadata?.weight || 0);
-    return total + (weight * item.quantity);
-  }, 0);
-
-  // Shipping cost calculation based on weight in grams
-  if (totalWeight <= 20) return 100; // €1,00 briefpost
-  if (totalWeight <= 50) return 200; // €2,00
-  if (totalWeight <= 500) return 410; // €4,10 brievenbuspakje
-  if (totalWeight <= 2000) return 695; // €6,95 standaard pakket
-  return 995; // €9,95 zwaar pakket (>2000g)
-};
-
 async function sendOrderConfirmationEmail(session) {
   try {
     console.log('📧 Sending order confirmation email...');
@@ -99,8 +84,13 @@ async function sendOrderConfirmationEmail(session) {
       total: (total / 100).toFixed(2)
     });
 
-    // Check if shipping is free based on the actual shipping amount
+    // Check if shipping is free based on the actual shipping amount from Stripe
     const isFreeShipping = shippingAmount === 0;
+    const shippingInfo = isFreeShipping ? 
+      "🎉 Gratis verzending" : 
+      `Verzendkosten (incl. BTW): €${(shippingAmount / 100).toFixed(2).replace('.', ',')}`;
+
+    console.log('📦 Shipping info:', { isFreeShipping, shippingAmount, shippingInfo });
 
     const emailPayload = {
       sender: {
@@ -143,9 +133,7 @@ async function sendOrderConfirmationEmail(session) {
         })),
         totalSaved: itemsWithDiscount.reduce((sum, item) => 
           sum + (parseFloat(item.itemSavings) * item.quantity), 0).toFixed(2),
-        shippingInfo: isFreeShipping ? 
-          "🎉 Gratis verzending" : 
-          `Verzendkosten (incl. BTW): €${(shippingAmount / 100).toFixed(2)}`
+        shippingInfo: shippingInfo
       }
     };
 

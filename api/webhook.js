@@ -58,13 +58,13 @@ async function getGoogleSheetClient() {
   }
 }
 
-function getRawBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = []
-    req.on('data', (chunk) => chunks.push(chunk))
-    req.on('end', () => resolve(Buffer.concat(chunks)))
-    req.on('error', reject)
-  })
+// Hulpfunctie om raw body te lezen
+async function getRawBody(req) {
+  const chunks = []
+  for await (const chunk of req) {
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks)
 }
 
 function formatPrice(amount) {
