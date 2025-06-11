@@ -1,6 +1,6 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { buffer } = require('micro');
-const fetch = require('node-fetch');
+const { google } = require('googleapis');
 
 // Disable body parsing, we need the raw body for signature verification
 export const config = {
@@ -89,17 +89,46 @@ export default async function handler(req, res) {
         expand: ['data.price.product']
       });
       const orderData = buildOrderData(session, lineItems);
-      // POST naar Cloud Function
-      const response = await fetch(CLOUD_FUNCTION_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(orderData)
+
+      // Google Sheets integratie direct
+      const credentials = JSON.parse(process.env.GOOGLE_SERVICE_KEY);
+      credentials.private_key = credentials.private_key.replace(/\\n/g, '\n');
+      const auth = new google.auth.JWT(
+        credentials.client_email,
+        null,
+        credentials.private_key,
+        ['https://www.googleapis.com/auth/spreadsheets']
+      );
+      const sheets = google.sheets({ version: 'v4', auth });
+      const spreadsheetId = '1OCFsr_vBZX5GodN0Bp3EPq45RHCL5PXD-g3ExkD0VAU';
+      const sheetName = 'Bestellingen';
+      const values = [
+        orderData['Order ID'] || '',
+        orderData['Date'] || '',
+        orderData['Customer Name'] || '',
+        orderData['Email'] || '',
+        orderData['Phone'] || '',
+        orderData['Country'] || '',
+        orderData['City'] || '',
+        orderData['Postal Code'] || '',
+        orderData['Address'] || '',
+        orderData['Original Amount'] || '',
+        orderData['Paid Amount'] || '',
+        orderData['Discount'] || '',
+        orderData['Discount %'] || '',
+        orderData['Products'] || '',
+        orderData['Subtotal'] || '',
+        orderData['Shipping'] || '',
+        orderData['Total'] || '',
+        orderData['Trackingslink'] || ''
+      ];
+      await sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: `${sheetName}!A1:Z1`,
+        valueInputOption: 'USER_ENTERED',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values: [values] }
       });
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Error posting to Cloud Function:', errorText);
-        throw new Error('Cloud Function error: ' + errorText);
-      }
       res.json({ received: true });
     } else {
       res.status(400).json({
